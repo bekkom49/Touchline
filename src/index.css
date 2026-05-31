@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-200: #a7f3d0;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-emerald-800: #065f46;
+  --color-emerald-900: #064e3b;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --animate-tab-in: tab-in 0.35s ease-out forwards;
+  --animate-fade-in: fade-in 0.3s ease-out forwards;
+}
+
+@keyframes tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
+  color: #f8fafc;
+  overscroll-behavior: none;
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Shared interaction utilities */
+.btn-interactive {
+  @apply transition-all duration-300 ease-out active:scale-[0.97];
+}
+
+.btn-interactive:hover:not(:disabled) {
+  @apply brightness-110;
+}
+
+.card-interactive {
+  @apply transition-all duration-300 ease-out;
+}
+
+.card-interactive:hover {
+  @apply -translate-y-0.5 shadow-lg;
+}
+
+.input-interactive {
+  @apply transition-all duration-200 ease-out focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20;
+}
+
+.page-shell {
+  @apply mx-auto w-full max-w-md px-4 py-6;
+}
+
+.page-header {
+  @apply mb-5 text-center sm:text-left;
+}
+
+.animate-tab-in {
+  animation: var(--animate-tab-in);
+}
+
+.animate-fade-in {
+  animation: var(--animate-fade-in);
+}
