@@ -4,6 +4,7 @@ import AuthScreen from './components/AuthScreen';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 import Dashboard from './components/Dashboard';
+import GlobalChat from './components/GlobalChat';
 import Team from './components/Team';
 import Schedule from './components/Schedule';
 
@@ -70,6 +71,7 @@ function AppContent() {
               <Dashboard />
             </div>
           )}
+          {activeTab === 'chat' && <GlobalChat />}
           {activeTab === 'team' && <Team />}
           {activeTab === 'schedule' && (
             <div className="h-full overflow-y-auto overscroll-contain">

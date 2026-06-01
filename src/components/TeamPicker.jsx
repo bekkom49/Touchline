@@ -34,12 +34,38 @@ export function useTeams() {
   return { teams, loading };
 }
 
-export default function TeamPicker({ teams, selectedId, onSelect, label = 'Choose your club' }) {
+export default function TeamPicker({
+  teams,
+  selectedId,
+  onSelect,
+  onSkip,
+  allowSkip = false,
+  label = 'Choose your club',
+}) {
+  const skipped = allowSkip && (selectedId == null || selectedId === '');
+
   return (
     <div className="space-y-2">
       <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
         {label}
       </span>
+      {allowSkip && (
+        <button
+          type="button"
+          onClick={() => onSkip?.()}
+          className={`card-interactive flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-all duration-300 ${
+            skipped
+              ? 'border-emerald-500/60 bg-emerald-950/40'
+              : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
+          }`}
+        >
+          <div>
+            <p className="text-sm font-bold text-white">Join a club later</p>
+            <p className="text-[10px] text-slate-500">Use an invite code on the Team tab anytime</p>
+          </div>
+          {skipped && <span className="text-xs font-bold text-emerald-400">Selected</span>}
+        </button>
+      )}
       <div className="max-h-48 space-y-2 overflow-y-auto overscroll-contain pr-0.5">
         {teams.map((team) => {
           const selected = Number(selectedId) === team.id;

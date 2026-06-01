@@ -4,21 +4,24 @@ import {
   MATCH_STATUS,
   ROLES,
   RSVP_STATUS,
+  generateInviteCode,
   normalizeRole,
+  computeStandings,
+  computeMatchResults,
 } from '../mockData';
 import { getDefaultTabForRole, useAuth } from './AuthContext';
 import { supabase } from '../supabaseClient';
 
 const AppContext = createContext(null);
 
-const DEFAULT_FIELDS = [
-  { id: 1, number: 3, rainout: false },
-  { id: 2, number: 5, rainout: false },
-  { id: 3, number: 7, rainout: true },
-];
-
 export function AppProvider({ children }) {
-  const { profile, joinClub: authJoinClub, leaveClub: authLeaveClub } = useAuth();
+  const {
+    profile,
+    joinClub: authJoinClub,
+    leaveClub: authLeaveClub,
+    joinClubByInviteCode: authJoinClubByInviteCode,
+    retryProfile,
+  } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -26,11 +29,19 @@ export function AppProvider({ children }) {
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [matches, setMatches] = useState([]);
+  const [matchGoals, setMatchGoals] = useState([]);
   const [rsvps, setRsvps] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [fields, setFields] = useState(DEFAULT_FIELDS);
-  const [standings] = useState([]);
-  const [matchResults] = useState([]);
+
+  const standings = useMemo(
+    () => computeStandings(teams, matches),
+    [teams, matches]
+  );
+
+  const matchResults = useMemo(
+    () => computeMatchResults(matches),
+    [matches]
+  );
 
   const actingUser = profile
     ? { ...profile, role: normalizeRole(profile.role) }
@@ -76,22 +87,51 @@ export function AppProvider({ children }) {
     );
   }, [users, myTeamId, activeRole]);
 
+  const clubMembers = useMemo(() => {
+    if (myTeamId == null) return [];
+    return users.filter(
+      (u) =>
+        u.team_id === myTeamId &&
+        (u.role === ROLES.PLAYER || u.role === ROLES.CAPTAIN)
+    );
+  }, [users, myTeamId]);
+
+  const globalMessages = useMemo(
+    () => messages.filter((m) => m.team_id == null),
+    [messages]
+  );
+
+  const clubMessages = useMemo(
+    () => messages.filter((m) => m.team_id === myTeamId),
+    [messages, myTeamId]
+  );
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    const [teamsRes, usersRes, matchesRes, rsvpsRes, messagesRes] = await Promise.all([
+    const [teamsRes, usersRes, matchesRes, goalsRes, rsvpsRes, messagesRes] =
+      await Promise.all([
       supabase.from('teams').select('*').order('id'),
       supabase.from('users').select('*').order('id'),
       supabase.from('matches').select('*').order('match_date'),
+      supabase.from('match_goals').select('*').order('id'),
       supabase.from('rsvps').select('*'),
       supabase.from('messages').select('*').order('id', { ascending: true }),
     ]);
+
+    const goalsMissingTable =
+      goalsRes.error &&
+      (goalsRes.error.message.includes('match_goals') ||
+        goalsRes.error.message.includes('PGRST205'));
 
     const errors = [
       teamsRes.error && `teams: ${teamsRes.error.message}`,
       usersRes.error && `users: ${usersRes.error.message}`,
       matchesRes.error && `matches: ${matchesRes.error.message}`,
+      goalsRes.error &&
+        !goalsMissingTable &&
+        `match_goals: ${goalsRes.error.message}`,
       rsvpsRes.error && `rsvps: ${rsvpsRes.error.message}`,
       messagesRes.error && `messages: ${messagesRes.error.message}`,
     ].filter(Boolean);
@@ -112,6 +152,7 @@ export function AppProvider({ children }) {
     setTeams(teamsRes.data ?? []);
     setUsers(usersRes.data ?? []);
     setMatches(matchesRes.data ?? []);
+    setMatchGoals(goalsMissingTable ? [] : goalsRes.data ?? []);
     setRsvps(rsvpsRes.data ?? []);
     setMessages(messagesRes.data ?? []);
     setLoading(false);
@@ -216,7 +257,7 @@ export function AppProvider({ children }) {
     return rsvps.filter((r) => r.match_id === matchId);
   }
 
-  async function sendMessage(text, senderName = actingUser.name) {
+  async function sendMessage(text, { senderName = actingUser.name, teamId = null } = {}) {
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -226,6 +267,7 @@ export function AppProvider({ children }) {
       text: trimmed,
       sender_name: senderName,
       timestamp,
+      team_id: teamId,
     };
 
     setMessages((prev) => [...prev, optimistic]);
@@ -236,6 +278,7 @@ export function AppProvider({ children }) {
         text: trimmed,
         sender_name: senderName,
         timestamp,
+        team_id: teamId,
       })
       .select()
       .single();
@@ -251,6 +294,15 @@ export function AppProvider({ children }) {
       if (withoutTemp.some((m) => m.id === data.id)) return withoutTemp;
       return [...withoutTemp, data];
     });
+  }
+
+  async function sendGlobalMessage(text, senderName = actingUser.name) {
+    return sendMessage(text, { senderName, teamId: null });
+  }
+
+  async function sendClubMessage(text) {
+    if (myTeamId == null) return;
+    return sendMessage(text, { teamId: myTeamId });
   }
 
   async function postponeMatch(matchId) {
@@ -276,17 +328,9 @@ export function AppProvider({ children }) {
       return;
     }
 
-    await sendMessage(
-      `⚠️ Match on Field ${match.field_number} has been POSTPONED due to league scheduling. We'll share a new date soon.`,
+    await sendGlobalMessage(
+      `⚠️ Match at ${match.field_address?.trim() || 'the scheduled venue'} has been POSTPONED due to league scheduling. We'll share a new date soon.`,
       'League Office'
-    );
-  }
-
-  function toggleFieldRainout(fieldNumber) {
-    setFields((prev) =>
-      prev.map((f) =>
-        f.number === fieldNumber ? { ...f, rainout: !f.rainout } : f
-      )
     );
   }
 
@@ -294,7 +338,7 @@ export function AppProvider({ children }) {
     const player = users.find((u) => u.id === userId);
     if (!player || !nextMatch) return;
 
-    await sendMessage(
+    await sendClubMessage(
       `@${player.name.split(' ')[0]} — please RSVP for our upcoming match!`
     );
   }
@@ -339,10 +383,16 @@ export function AppProvider({ children }) {
     }
   }
 
-  async function createMatch({ homeTeamId, awayTeamId, matchDate, fieldNumber }) {
+  async function createMatch({ homeTeamId, awayTeamId, matchDate, fieldAddress }) {
     const homeTeam = teams.find((t) => t.id === homeTeamId);
     const awayTeam = teams.find((t) => t.id === awayTeamId);
     if (!homeTeam || !awayTeam) return;
+
+    const address = fieldAddress?.trim();
+    if (!address) {
+      console.error('Create match failed: field address is required.');
+      return { ok: false, error: 'Enter the field address.' };
+    }
 
     const { data, error: insertError } = await supabase
       .from('matches')
@@ -350,7 +400,8 @@ export function AppProvider({ children }) {
         home_team_id: homeTeamId,
         away_team_id: awayTeamId,
         match_date: matchDate,
-        field_number: Number(fieldNumber),
+        field_number: 1,
+        field_address: address,
         status: MATCH_STATUS.SCHEDULED,
         assigned_home_kit: homeTeam.primary_kit_color,
         assigned_away_kit: awayTeam.away_kit_color,
@@ -359,13 +410,18 @@ export function AppProvider({ children }) {
       .single();
 
     if (insertError) {
-      console.error('Create match failed:', insertError.message);
-      return;
+      const needsMigration = insertError.message.includes('field_address');
+      const message = needsMigration
+        ? `${insertError.message} — run supabase/match-field-address.sql in Supabase SQL Editor.`
+        : insertError.message;
+      console.error('Create match failed:', message);
+      return { ok: false, error: message };
     }
 
     setMatches((prev) =>
       [...prev, data].sort((a, b) => new Date(a.match_date) - new Date(b.match_date))
     );
+    return { ok: true, match: data };
   }
 
   async function joinClub(teamId) {
@@ -380,6 +436,160 @@ export function AppProvider({ children }) {
     return result;
   }
 
+  async function joinClubByInviteCode(code) {
+    const result = await authJoinClubByInviteCode(code);
+    if (result.ok) await fetchAll();
+    return result;
+  }
+
+  async function submitMatchResult(matchId, homeScore, awayScore, goalEntries = []) {
+    if (activeRole !== ROLES.ORGANIZER) {
+      return { ok: false, error: 'Only organizers can record match results.' };
+    }
+
+    const home = Number(homeScore);
+    const away = Number(awayScore);
+    if (!Number.isInteger(home) || !Number.isInteger(away) || home < 0 || away < 0) {
+      return { ok: false, error: 'Enter valid whole-number scores.' };
+    }
+
+    const match = matches.find((m) => m.id === matchId);
+    if (!match) {
+      return { ok: false, error: 'Match not found.' };
+    }
+
+    const homeGoals = goalEntries.filter((g) => g.team_id === match.home_team_id);
+    const awayGoals = goalEntries.filter((g) => g.team_id === match.away_team_id);
+
+    if (homeGoals.length !== home || awayGoals.length !== away) {
+      return { ok: false, error: 'Enter a scorer for each goal.' };
+    }
+
+    for (const goal of goalEntries) {
+      if (!goal.scorer_id) {
+        return { ok: false, error: 'Select who scored each goal.' };
+      }
+      if (goal.assist_id && goal.assist_id === goal.scorer_id) {
+        return { ok: false, error: 'Scorer and assist must be different players.' };
+      }
+    }
+
+    const existing = matches.find((m) => m.id === matchId);
+    const { data, error } = await supabase
+      .from('matches')
+      .update({
+        home_score: home,
+        away_score: away,
+        status: MATCH_STATUS.COMPLETED,
+      })
+      .eq('id', matchId)
+      .select()
+      .single();
+
+    if (error) {
+      const needsMigration =
+        error.message.includes('home_score') ||
+        error.message.includes('match_status');
+      return {
+        ok: false,
+        error: needsMigration
+          ? `${error.message} — run supabase/match-scores-and-captain-clubs.sql in Supabase SQL Editor.`
+          : error.message,
+      };
+    }
+
+    const { error: deleteGoalsError } = await supabase
+      .from('match_goals')
+      .delete()
+      .eq('match_id', matchId);
+
+    if (deleteGoalsError) {
+      const needsGoalsMigration =
+        deleteGoalsError.message.includes('match_goals') ||
+        deleteGoalsError.message.includes('PGRST205');
+      return {
+        ok: false,
+        error: needsGoalsMigration
+          ? `${deleteGoalsError.message} — run supabase/match-goals.sql in Supabase SQL Editor.`
+          : deleteGoalsError.message,
+      };
+    }
+
+    let savedGoals = [];
+    if (goalEntries.length > 0) {
+      const rows = goalEntries.map((g) => ({
+        match_id: matchId,
+        team_id: g.team_id,
+        scorer_id: g.scorer_id,
+        assist_id: g.assist_id || null,
+      }));
+
+      const { data: insertedGoals, error: insertGoalsError } = await supabase
+        .from('match_goals')
+        .insert(rows)
+        .select();
+
+      if (insertGoalsError) {
+        return {
+          ok: false,
+          error: insertGoalsError.message.includes('match_goals')
+            ? `${insertGoalsError.message} — run supabase/match-goals.sql in Supabase SQL Editor.`
+            : insertGoalsError.message,
+        };
+      }
+
+      savedGoals = insertedGoals ?? [];
+    }
+
+    setMatches((prev) => prev.map((m) => (m.id === matchId ? data : m)));
+    setMatchGoals((prev) => [
+      ...prev.filter((g) => g.match_id !== matchId),
+      ...savedGoals,
+    ]);
+
+    return { ok: true, match: data, previous: existing, goals: savedGoals };
+  }
+
+  async function createClub({ name, primaryKitColor, awayKitColor }) {
+    if (activeRole !== ROLES.CAPTAIN) {
+      return { ok: false, error: 'Only captains can create clubs.' };
+    }
+    if (!actingUser.id) {
+      return { ok: false, error: 'You must be signed in to create a club.' };
+    }
+
+    const inviteCode = generateInviteCode();
+    const { data, error } = await supabase
+      .from('teams')
+      .insert({
+        name: name.trim(),
+        primary_kit_color: primaryKitColor.trim(),
+        away_kit_color: awayKitColor.trim(),
+        invite_code: inviteCode,
+        created_by: actingUser.id,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    const { error: assignError } = await supabase
+      .from('users')
+      .update({ team_id: data.id })
+      .eq('id', actingUser.id);
+
+    if (assignError) {
+      return { ok: false, error: assignError.message };
+    }
+
+    setTeams((prev) => [...prev, data].sort((a, b) => a.id - b.id));
+    await retryProfile();
+    await fetchAll();
+    return { ok: true, team: data };
+  }
+
   const value = {
     activeRole,
     activeTab,
@@ -391,9 +601,12 @@ export function AppProvider({ children }) {
     users,
     teams,
     matches,
+    matchGoals,
     rsvps,
     messages,
-    fields,
+    globalMessages,
+    clubMessages,
+    clubMembers,
     standings,
     matchResults,
     nextMatch,
@@ -403,14 +616,18 @@ export function AppProvider({ children }) {
     getRsvpForUser,
     getRsvpsForMatch,
     sendMessage,
+    sendGlobalMessage,
+    sendClubMessage,
     postponeMatch,
-    toggleFieldRainout,
     nudgePlayer,
     addPlayer,
     removePlayer,
     createMatch,
+    submitMatchResult,
     joinClub,
     leaveClub,
+    joinClubByInviteCode,
+    createClub,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

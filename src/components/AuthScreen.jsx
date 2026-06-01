@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Calendar, Shield, User, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ROLES } from '../mockData';
 import TeamPicker, { useTeams } from './TeamPicker';
+import { supabase, getAuthPersistencePreference } from '../supabaseClient';
 
 const roleOptions = [
   {
@@ -25,25 +26,58 @@ const roleOptions = [
   },
 ];
 
+async function lookupTeamIdByInviteCode(code) {
+  const normalized = String(code ?? '').trim().toUpperCase();
+  if (!normalized) return null;
+
+  const { data, error } = await supabase
+    .from('teams')
+    .select('id, name')
+    .eq('invite_code', normalized)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data;
+}
+
 export default function AuthScreen() {
   const { signIn, signUp, authError, setAuthError } = useAuth();
   const { teams } = useTeams();
   const [mode, setMode] = useState('login');
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [staySignedIn, setStaySignedIn] = useState(getAuthPersistencePreference);
 
   const [form, setForm] = useState({
     name: '',
     email: '',
     password: '',
     role: ROLES.PLAYER,
-    teamId: 1,
+    teamId: null,
+    inviteCode: '',
   });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get('invite');
+    if (invite) {
+      setForm((prev) => ({ ...prev, inviteCode: invite.toUpperCase(), role: ROLES.PLAYER }));
+      setMode('signup');
+    }
+  }, []);
 
   function switchMode(nextMode) {
     setMode(nextMode);
     setAuthError(null);
     setSuccessMessage('');
+  }
+
+  function handleRoleChange(role) {
+    setForm((prev) => ({
+      ...prev,
+      role,
+      teamId: role === ROLES.PLAYER ? null : role === ROLES.CAPTAIN ? 1 : null,
+    }));
   }
 
   async function handleSubmit(e) {
@@ -54,17 +88,25 @@ export default function AuthScreen() {
 
     try {
       if (mode === 'login') {
-        await signIn(form.email, form.password);
+        await signIn(form.email, form.password, { staySignedIn });
       } else {
         if (!form.name.trim()) {
           setAuthError('Please enter your name.');
           return;
         }
-        if (form.role !== ROLES.ORGANIZER && !form.teamId) {
-          setAuthError('Please choose a club to join.');
-          return;
+
+        let teamId = form.teamId;
+
+        if (form.inviteCode.trim()) {
+          const invitedTeam = await lookupTeamIdByInviteCode(form.inviteCode);
+          if (!invitedTeam) {
+            setAuthError('Invalid invite code.');
+            return;
+          }
+          teamId = invitedTeam.id;
         }
-        const result = await signUp(form);
+
+        const result = await signUp({ ...form, teamId });
         if (result.needsEmailConfirm) {
           setSuccessMessage('Account created! Check your email to confirm, then sign in.');
           switchMode('login');
@@ -145,7 +187,7 @@ export default function AuthScreen() {
                       <button
                         key={value}
                         type="button"
-                        onClick={() => setForm({ ...form, role: value })}
+                        onClick={() => handleRoleChange(value)}
                         className={`card-interactive flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all duration-300 ${
                           selected
                             ? 'border-emerald-500/60 bg-emerald-950/40 shadow-md shadow-emerald-900/20'
@@ -169,12 +211,41 @@ export default function AuthScreen() {
                 </div>
               </div>
 
-              {form.role !== ROLES.ORGANIZER && (
+              {form.role === ROLES.PLAYER && (
+                <>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Invite code (optional)
+                    </span>
+                    <input
+                      type="text"
+                      value={form.inviteCode}
+                      onChange={(e) =>
+                        setForm({ ...form, inviteCode: e.target.value.toUpperCase() })
+                      }
+                      placeholder="AB12CD34"
+                      className="input-interactive w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 font-mono text-sm uppercase text-white placeholder:normal-case placeholder:text-slate-600"
+                    />
+                  </label>
+                  {!form.inviteCode.trim() && (
+                    <TeamPicker
+                      teams={teams}
+                      selectedId={form.teamId}
+                      onSelect={(teamId) => setForm({ ...form, teamId })}
+                      onSkip={() => setForm({ ...form, teamId: null })}
+                      allowSkip
+                      label="Join a club (optional)"
+                    />
+                  )}
+                </>
+              )}
+
+              {form.role === ROLES.CAPTAIN && (
                 <TeamPicker
                   teams={teams}
                   selectedId={form.teamId}
                   onSelect={(teamId) => setForm({ ...form, teamId })}
-                  label="Join a club"
+                  label="Your club"
                 />
               )}
             </>
@@ -208,6 +279,18 @@ export default function AuthScreen() {
               className="input-interactive w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600"
             />
           </label>
+
+          {mode === 'login' && (
+            <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={staySignedIn}
+                onChange={(e) => setStaySignedIn(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-950"
+              />
+              <span className="text-sm text-slate-300">Stay signed in</span>
+            </label>
+          )}
 
           {authError && (
             <div className="animate-fade-in rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200">

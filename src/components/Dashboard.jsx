@@ -1,5 +1,6 @@
 import { useApp } from '../context/AppContext';
 import EmptyState from './EmptyState';
+import FieldLocations from './FieldLocations';
 import {
   MATCH_STATUS,
   ROLES,
@@ -28,9 +29,9 @@ export default function Dashboard() {
     updateRsvp,
     getRsvpForUser,
     postponeMatch,
-    fields,
-    toggleFieldRainout,
   } = useApp();
+
+  const isOrganizer = activeRole === ROLES.ORGANIZER;
 
   if (!nextMatch) {
     return (
@@ -46,6 +47,7 @@ export default function Dashboard() {
             description="Check the Schedule tab or ask your organizer to add one."
           />
         </div>
+        <FieldLocations />
       </div>
     );
   }
@@ -61,10 +63,8 @@ export default function Dashboard() {
   const myKit = isHome ? nextMatch.assigned_home_kit : nextMatch.assigned_away_kit;
   const opponentKit = isHome ? nextMatch.assigned_away_kit : nextMatch.assigned_home_kit;
   const isPostponed = nextMatch.status === MATCH_STATUS.POSTPONED;
-  const field = fields.find((f) => f.number === nextMatch.field_number);
   const userRsvp = getRsvpForUser(nextMatch.id, actingUser.id);
   const canRsvp = activeRole === ROLES.PLAYER && !isPostponed;
-  const isOrganizer = activeRole === ROLES.ORGANIZER;
 
   return (
     <div className="page-shell">
@@ -124,7 +124,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="flex justify-center gap-8">
+          <div className="flex justify-center">
             <div className="text-center">
               <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
                 Kickoff
@@ -136,18 +136,14 @@ export default function Dashboard() {
                 {formatMatchTime(nextMatch.match_date)}
               </p>
             </div>
-            <div className="text-center">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                Field
-              </p>
-              <p className="text-2xl font-extrabold text-white">#{nextMatch.field_number}</p>
-              {field?.rainout && (
-                <p className="text-xs font-semibold text-amber-400 transition-colors duration-300">
-                  ⚠ Rainout watch
-                </p>
-              )}
-            </div>
           </div>
+
+          {nextMatch.field_address?.trim() && (
+            <p className="text-center text-xs text-slate-400">
+              <span className="font-medium text-slate-500">Venue: </span>
+              {nextMatch.field_address.trim()}
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             {isOnTeam ? (
@@ -219,34 +215,7 @@ export default function Dashboard() {
         </div>
       </article>
 
-      {isOrganizer && (
-        <section className="mt-6">
-          <h3 className="mb-3 text-center text-sm font-bold uppercase tracking-wider text-slate-400">
-            Field Rainout Status
-          </h3>
-          <div className="space-y-2">
-            {fields.map((fieldItem) => (
-              <button
-                key={fieldItem.id}
-                type="button"
-                onClick={() => toggleFieldRainout(fieldItem.number)}
-                className="card-interactive btn-interactive flex w-full items-center justify-between rounded-xl border border-slate-700/60 bg-slate-800/50 px-4 py-3 hover:border-emerald-600/30 hover:bg-slate-800/80"
-              >
-                <span className="font-semibold text-white">Field #{fieldItem.number}</span>
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
-                    fieldItem.rainout
-                      ? 'bg-amber-500/20 text-amber-300'
-                      : 'bg-emerald-500/20 text-emerald-300'
-                  }`}
-                >
-                  {fieldItem.rainout ? 'Rainout' : 'Open'}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      <FieldLocations />
     </div>
   );
 }

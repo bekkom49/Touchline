@@ -1,18 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { DEFAULT_TEAM_ID, ROLES, isPlayerRole } from '../mockData';
-import { supabase } from '../supabaseClient';
+import { ROLES, resolveSignupTeamId, isPlayerRole } from '../mockData';
+import { supabase, clearStoredAuthSession, setAuthPersistence } from '../supabaseClient';
 
 const AuthContext = createContext(null);
 
 function buildProfilePayload(authUser, { name, role, teamId }) {
-  const resolvedTeamId =
-    role === ROLES.ORGANIZER ? null : teamId ?? DEFAULT_TEAM_ID;
   return {
     auth_id: authUser.id,
     name: name.trim(),
     email: authUser.email,
     role,
-    team_id: resolvedTeamId,
+    team_id: resolveSignupTeamId(role, teamId),
   };
 }
 
@@ -69,13 +67,14 @@ async function ensureUserProfile(authUser, signupMeta) {
 
   if (authUser.user_metadata?.role) {
     const metaTeamId = authUser.user_metadata.team_id;
+    const metaRole = authUser.user_metadata.role;
     const { data, error } = await supabase
       .from('users')
       .insert(
         buildProfilePayload(authUser, {
           name: authUser.user_metadata.name ?? authUser.email.split('@')[0],
-          role: authUser.user_metadata.role,
-          teamId: metaTeamId != null ? Number(metaTeamId) : DEFAULT_TEAM_ID,
+          role: metaRole,
+          teamId: metaTeamId != null && metaTeamId !== '' ? Number(metaTeamId) : null,
         })
       )
       .select()
@@ -169,8 +168,11 @@ export function AuthProvider({ children }) {
     };
   }, [loadProfile]);
 
-  async function signIn(email, password) {
+  async function signIn(email, password, { staySignedIn = true } = {}) {
     setAuthError(null);
+    setAuthPersistence(staySignedIn);
+    clearStoredAuthSession();
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
@@ -193,12 +195,7 @@ export function AuthProvider({ children }) {
   async function signUp({ name, email, password, role, teamId }) {
     setAuthError(null);
 
-    if (role !== ROLES.ORGANIZER && !teamId) {
-      setAuthError('Please choose a club to join.');
-      return { ok: false, needsEmailConfirm: false, role: null };
-    }
-
-    const resolvedTeamId = role === ROLES.ORGANIZER ? null : Number(teamId);
+    const resolvedTeamId = resolveSignupTeamId(role, teamId);
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -285,6 +282,28 @@ export function AuthProvider({ children }) {
     return { ok: true, profile: data };
   }
 
+  async function joinClubByInviteCode(code) {
+    const normalized = String(code ?? '').trim().toUpperCase();
+    if (!normalized) {
+      return { ok: false, error: 'Enter an invite code.' };
+    }
+
+    const { data: team, error: lookupError } = await supabase
+      .from('teams')
+      .select('id, name, invite_code')
+      .eq('invite_code', normalized)
+      .maybeSingle();
+
+    if (lookupError) {
+      return { ok: false, error: lookupError.message };
+    }
+    if (!team) {
+      return { ok: false, error: 'Invalid invite code.' };
+    }
+
+    return joinClub(team.id);
+  }
+
   async function signOut() {
     setAuthError(null);
     await supabase.auth.signOut();
@@ -303,6 +322,7 @@ export function AuthProvider({ children }) {
     signOut,
     joinClub,
     leaveClub,
+    joinClubByInviteCode,
     retryProfile: async () => {
       if (!session?.user) return;
       setAuthError(null);

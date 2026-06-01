@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import EmptyState from './EmptyState';
+import ClubChat from './ClubChat';
+import CreateClubPanel from './CreateClubPanel';
 import TeamPicker, { FALLBACK_TEAMS } from './TeamPicker';
 import {
-  ROLES,
   RSVP_STATUS,
-  formatMessageTime,
   getTeamById,
   isCaptainRole,
   isOrganizerRole,
@@ -19,126 +19,32 @@ const rsvpGroups = [
   { key: RSVP_STATUS.NO_RESPONSE, label: 'No Response', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
 ];
 
-function TeamChat({ onBack }) {
-  const { actingUser, messages, sendMessage } = useApp();
-  const [chatInput, setChatInput] = useState('');
-
-  function handleSend(e) {
-    e.preventDefault();
-    sendMessage(chatInput);
-    setChatInput('');
-  }
-
-  return (
-    <div className="flex h-full flex-col animate-tab-in">
-      <div className="shrink-0 border-b border-emerald-900/30 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="btn-interactive flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700/60 bg-slate-800/80 text-sm text-slate-300 hover:border-emerald-600/40 hover:text-white"
-            aria-label="Back to roster"
-          >
-            ←
-          </button>
-          <div>
-            <h2 className="text-lg font-bold text-white">Team Chat</h2>
-            <p className="text-xs text-slate-400">
-              {messages.length} message{messages.length !== 1 ? 's' : ''}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
-        {messages.length === 0 ? (
-          <EmptyState
-            icon="💬"
-            title="No messages yet"
-            description="Say hello to your squad — updates and alerts will show up here."
-          />
-        ) : (
-          <div className="space-y-3 pb-2">
-            {messages.map((msg) => {
-              const isMe = msg.sender_name === actingUser.name;
-              const isAlert = msg.text.startsWith('⚠️');
-              return (
-                <div
-                  key={msg.id}
-                  className={`animate-fade-in flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-3 py-2 transition-all duration-300 ${
-                      isAlert
-                        ? 'border border-red-500/40 bg-red-950/60 text-red-100'
-                        : isMe
-                          ? 'bg-emerald-600 text-emerald-950 shadow-md shadow-emerald-900/20'
-                          : 'bg-slate-800 text-slate-100 hover:bg-slate-700/80'
-                    }`}
-                  >
-                    {!isMe && (
-                      <p className="mb-0.5 text-[10px] font-bold opacity-70">{msg.sender_name}</p>
-                    )}
-                    <p className="text-sm leading-snug">{msg.text}</p>
-                    <p className={`mt-1 text-[10px] ${isMe ? 'text-emerald-900/60' : 'text-slate-500'}`}>
-                      {formatMessageTime(msg.timestamp)}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <form
-        onSubmit={handleSend}
-        className="safe-bottom shrink-0 border-t border-slate-700/50 bg-slate-900/95 px-4 py-3 backdrop-blur-sm"
-      >
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder="Message the team..."
-            className="input-interactive min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm text-white placeholder:text-slate-500"
-          />
-          <button
-            type="submit"
-            disabled={!chatInput.trim()}
-            className="btn-interactive shrink-0 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-emerald-900/30 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:brightness-100"
-          >
-            Send
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export default function Team() {
   const {
     activeRole,
-    actingUser,
     teamPlayers,
+    clubMembers,
+    clubMessages,
     teams,
     myTeamId,
     nextMatch,
-    messages,
     getRsvpsForMatch,
     nudgePlayer,
     addPlayer,
     removePlayer,
     joinClub,
     leaveClub,
+    joinClubByInviteCode,
   } = useApp();
   const { setAuthError } = useAuth();
 
-  const [showChat, setShowChat] = useState(false);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
+  const [showClubChat, setShowClubChat] = useState(false);
+  const [showCreateClub, setShowCreateClub] = useState(false);
   const [clubBusy, setClubBusy] = useState(false);
   const [clubMessage, setClubMessage] = useState('');
   const [clubMessageOk, setClubMessageOk] = useState(true);
+  const [inviteCode, setInviteCode] = useState('');
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
   const [pickedTeamId, setPickedTeamId] = useState(myTeamId ?? teams[0]?.id ?? 1);
@@ -165,10 +71,7 @@ export default function Team() {
       setClubMessage('Club updated.');
     } else {
       setClubMessageOk(false);
-      setClubMessage(
-        result.error ??
-          'Could not update club. In Supabase, run supabase/allow-player-leave-club.sql, then try again.'
-      );
+      setClubMessage(result.error ?? 'Could not update club.');
     }
     setClubBusy(false);
   }
@@ -183,10 +86,24 @@ export default function Team() {
       setClubMessage('You left the club.');
     } else {
       setClubMessageOk(false);
-      setClubMessage(
-        result.error ??
-          'Could not leave club. In Supabase, run supabase/allow-player-leave-club.sql, then try again.'
-      );
+      setClubMessage(result.error ?? 'Could not leave club.');
+    }
+    setClubBusy(false);
+  }
+
+  async function handleJoinByInvite(e) {
+    e.preventDefault();
+    setClubBusy(true);
+    setClubMessage('');
+    setAuthError(null);
+    const result = await joinClubByInviteCode(inviteCode);
+    if (result.ok) {
+      setClubMessageOk(true);
+      setClubMessage('Joined club with invite code.');
+      setInviteCode('');
+    } else {
+      setClubMessageOk(false);
+      setClubMessage(result.error ?? 'Invalid invite code.');
     }
     setClubBusy(false);
   }
@@ -207,8 +124,8 @@ export default function Team() {
     setShowAddPlayer(false);
   }
 
-  if (showChat) {
-    return <TeamChat onBack={() => setShowChat(false)} />;
+  if (showClubChat && currentTeam) {
+    return <ClubChat team={currentTeam} onBack={() => setShowClubChat(false)} />;
   }
 
   return (
@@ -217,10 +134,19 @@ export default function Team() {
         <div className="page-header mb-0">
           <h2 className="text-lg font-bold text-white">Team</h2>
           <p className="text-sm text-slate-400">
-            {nextMatch ? 'RSVPs for next match' : 'Roster overview'}
+            {currentTeam ? currentTeam.name : 'Your club & roster'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {isCaptain && (
+            <button
+              type="button"
+              onClick={() => setShowCreateClub((v) => !v)}
+              className="btn-interactive rounded-xl border border-emerald-600/40 px-3 py-1.5 text-xs font-bold text-emerald-300 hover:bg-emerald-950/40"
+            >
+              {showCreateClub ? 'Close' : '+ Club'}
+            </button>
+          )}
           {isCaptain && (
             <button
               type="button"
@@ -233,88 +159,114 @@ export default function Team() {
         </div>
       </div>
 
+      {showCreateClub && isCaptain && (
+        <CreateClubPanel onClose={() => setShowCreateClub(false)} />
+      )}
+
       {!isOrganizer && (
         <div className="card-interactive mb-4 rounded-2xl border-2 border-emerald-600/40 bg-emerald-950/20 p-4 shadow-md shadow-emerald-900/10">
           <h3 className="mb-1 text-sm font-bold text-white">My Club</h3>
-          {currentTeam ? (
-            <p className="mb-3 text-xs text-slate-400">
-              You&apos;re with{' '}
-              <span className="font-semibold text-emerald-400">{currentTeam.name}</span>
-              {isCaptain && ' — captains manage this roster'}
-            </p>
-          ) : (
-            <p className="mb-3 text-xs text-slate-400">
-              {isPlayer
-                ? "You're not on a club yet — pick one below to join."
-                : 'No club assigned to your profile yet.'}
-            </p>
+          {currentTeam && (
+            <p className="mb-2 text-sm font-semibold text-emerald-400">{currentTeam.name}</p>
           )}
 
-          {isPlayer ? (
+          {currentTeam ? (
             <>
-              <TeamPicker
-                teams={clubTeams}
-                selectedId={currentTeam ? myTeamId : pickedTeamId}
-                onSelect={setPickedTeamId}
-                label={currentTeam ? 'Switch club' : 'Join a club'}
-              />
+              <p className="mb-3 text-xs text-slate-400">
+                {currentTeam.primary_kit_color} / {currentTeam.away_kit_color}
+                {' · '}
+                {clubMembers.length} teammate{clubMembers.length !== 1 ? 's' : ''}
+              </p>
 
-              <div className="mt-3 flex gap-2">
-                {(!currentTeam || Number(pickedTeamId) !== Number(myTeamId)) && (
-                  <button
-                    type="button"
-                    disabled={clubBusy || !pickedTeamId}
-                    onClick={() => handleJoinClub(pickedTeamId)}
-                    className="btn-interactive flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
-                  >
-                    {currentTeam ? 'Switch club' : 'Join club'}
-                  </button>
-                )}
-                {currentTeam && (
-                  <button
-                    type="button"
-                    disabled={clubBusy}
-                    onClick={handleLeaveClub}
-                    className="btn-interactive rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-2.5 text-sm font-bold text-red-300 hover:bg-red-950/50 disabled:opacity-40"
-                  >
-                    Leave club
-                  </button>
-                )}
-              </div>
-              {clubMessage && (
-                <p className={`mt-2 text-xs ${clubMessageOk ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {clubMessage}
-                </p>
+              <button
+                type="button"
+                onClick={() => setShowClubChat(true)}
+                className="card-interactive btn-interactive mb-3 flex w-full items-center justify-between rounded-2xl border border-emerald-600/30 bg-gradient-to-r from-emerald-950/60 to-slate-900 px-4 py-3.5 text-left shadow-md shadow-emerald-900/10 hover:border-emerald-500/50"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600/20 text-xl">
+                    💬
+                  </span>
+                  <div>
+                    <p className="text-sm font-bold text-white">Club Chat</p>
+                    <p className="text-xs text-slate-400">
+                      {clubMessages.length === 0
+                        ? 'No messages yet — tap to open'
+                        : `${clubMessages.length} message${clubMessages.length !== 1 ? 's' : ''} with ${currentTeam.name}`}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-emerald-400 transition-transform duration-300">→</span>
+              </button>
+
+              {isPlayer && (
+                <button
+                  type="button"
+                  disabled={clubBusy}
+                  onClick={handleLeaveClub}
+                  className="btn-interactive w-full rounded-xl border border-red-500/30 bg-red-950/30 py-2.5 text-sm font-bold text-red-300 hover:bg-red-950/50 disabled:opacity-40"
+                >
+                  Leave club
+                </button>
               )}
             </>
+          ) : isPlayer ? (
+            <>
+              <p className="mb-3 text-xs text-slate-400">
+                You&apos;re not on a club yet — join with an invite code or pick a club below.
+              </p>
+
+              <form onSubmit={handleJoinByInvite} className="mb-3 space-y-2">
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Invite code
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                      placeholder="AB12CD34"
+                      className="input-interactive min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 font-mono text-sm uppercase text-white placeholder:normal-case placeholder:text-slate-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={clubBusy || !inviteCode.trim()}
+                      className="btn-interactive shrink-0 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
+                    >
+                      Join
+                    </button>
+                  </div>
+                </label>
+              </form>
+
+              <TeamPicker
+                teams={clubTeams}
+                selectedId={pickedTeamId}
+                onSelect={setPickedTeamId}
+                label="Or browse clubs"
+              />
+
+              <button
+                type="button"
+                disabled={clubBusy || !pickedTeamId}
+                onClick={() => handleJoinClub(pickedTeamId)}
+                className="btn-interactive mt-3 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
+              >
+                Join club
+              </button>
+            </>
           ) : (
-            <p className="text-xs text-slate-500">
-              Only players can join or leave clubs. Sign up or sign in with a Player account.
+            <p className="text-xs text-slate-500">No club assigned to your captain profile yet.</p>
+          )}
+
+          {clubMessage && (
+            <p className={`mt-2 text-xs ${clubMessageOk ? 'text-emerald-400' : 'text-red-400'}`}>
+              {clubMessage}
             </p>
           )}
         </div>
       )}
-
-      <button
-        type="button"
-        onClick={() => setShowChat(true)}
-        className="card-interactive btn-interactive mb-4 flex w-full items-center justify-between rounded-2xl border border-emerald-600/30 bg-gradient-to-r from-emerald-950/60 to-slate-900 px-4 py-3.5 text-left shadow-md shadow-emerald-900/10 hover:border-emerald-500/50"
-      >
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600/20 text-xl">
-            💬
-          </span>
-          <div>
-            <p className="text-sm font-bold text-white">Team Chat</p>
-            <p className="text-xs text-slate-400">
-              {messages.length === 0
-                ? 'No messages yet — tap to open'
-                : `${messages.length} message${messages.length !== 1 ? 's' : ''}`}
-            </p>
-          </div>
-        </div>
-        <span className="text-emerald-400 transition-transform duration-300">→</span>
-      </button>
 
       {showAddPlayer && isCaptain && (
         <form
@@ -344,67 +296,74 @@ export default function Team() {
         </form>
       )}
 
-      {!hasRoster ? (
-        <div className="card-interactive overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-800/30">
-          <EmptyState
-            icon="👤"
-            title="No players on roster"
-            description="Captains can add players using the + Add button above."
-          />
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {rsvpGroups.map((group) => {
-            const players = playersByStatus(group.key);
-            return (
-              <div
-                key={group.key}
-                className={`card-interactive rounded-xl border ${group.border} ${group.bg} p-3 hover:brightness-110`}
-              >
-                <p className={`mb-2 text-xs font-bold uppercase tracking-wider ${group.color}`}>
-                  {group.label} ({players.length})
-                </p>
-                {players.length === 0 ? (
-                  <p className="py-2 text-center text-xs text-slate-500">No players in this group</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {players.map((player) => (
-                      <li
-                        key={player.id}
-                        className="card-interactive flex items-center justify-between rounded-xl bg-slate-900/50 px-3 py-2 transition-colors hover:bg-slate-900/70"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-white">{player.name}</p>
-                          <p className="truncate text-[10px] text-slate-500">{player.email}</p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          {isCaptain && group.key === RSVP_STATUS.NO_RESPONSE && (
-                            <button
-                              type="button"
-                              onClick={() => nudgePlayer(player.id)}
-                              className="btn-interactive rounded-lg bg-amber-500/20 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-500/30"
-                            >
-                              Nudge
-                            </button>
-                          )}
-                          {isCaptain && (
-                            <button
-                              type="button"
-                              onClick={() => removePlayer(player.id)}
-                              className="btn-interactive rounded-lg bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20"
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      {nextMatch && (
+        <>
+          <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-emerald-400">
+            RSVPs — next match
+          </h3>
+          {!hasRoster ? (
+            <div className="card-interactive overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-800/30">
+              <EmptyState
+                icon="👤"
+                title="No players on roster"
+                description="Captains can add players using the + Add button above."
+              />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {rsvpGroups.map((group) => {
+                const players = playersByStatus(group.key);
+                return (
+                  <div
+                    key={group.key}
+                    className={`card-interactive rounded-xl border ${group.border} ${group.bg} p-3 hover:brightness-110`}
+                  >
+                    <p className={`mb-2 text-xs font-bold uppercase tracking-wider ${group.color}`}>
+                      {group.label} ({players.length})
+                    </p>
+                    {players.length === 0 ? (
+                      <p className="py-2 text-center text-xs text-slate-500">No players in this group</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {players.map((player) => (
+                          <li
+                            key={player.id}
+                            className="card-interactive flex items-center justify-between rounded-xl bg-slate-900/50 px-3 py-2 transition-colors hover:bg-slate-900/70"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-white">{player.name}</p>
+                              <p className="truncate text-[10px] text-slate-500">{player.email}</p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              {isCaptain && group.key === RSVP_STATUS.NO_RESPONSE && (
+                                <button
+                                  type="button"
+                                  onClick={() => nudgePlayer(player.id)}
+                                  className="btn-interactive rounded-lg bg-amber-500/20 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-500/30"
+                                >
+                                  Nudge
+                                </button>
+                              )}
+                              {isCaptain && (
+                                <button
+                                  type="button"
+                                  onClick={() => removePlayer(player.id)}
+                                  className="btn-interactive rounded-lg bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

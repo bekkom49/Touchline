@@ -34,6 +34,8 @@ BEGIN
 
   resolved_team := CASE
     WHEN chosen_role = 'Organizer' THEN NULL
+    WHEN chosen_team IS NOT NULL THEN chosen_team
+    WHEN chosen_role = 'Player' THEN NULL
     ELSE COALESCE(chosen_team, 1)
   END;
 

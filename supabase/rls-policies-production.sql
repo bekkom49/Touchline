@@ -45,7 +45,9 @@ BEGIN
 
   resolved_team := CASE
     WHEN chosen_role = 'Organizer' THEN NULL
-    ELSE COALESCE(chosen_team, 1)
+    WHEN chosen_team IS NOT NULL THEN chosen_team
+    WHEN chosen_role = 'Player' THEN NULL
+    ELSE 1
   END;
 
   UPDATE public.users
@@ -228,6 +230,8 @@ DROP POLICY IF EXISTS "Allow anon insert messages" ON public.messages;
 
 DROP POLICY IF EXISTS "teams_select_authenticated" ON public.teams;
 DROP POLICY IF EXISTS "teams_select_public" ON public.teams;
+DROP POLICY IF EXISTS "teams_insert_organizer" ON public.teams;
+DROP POLICY IF EXISTS "teams_insert_captain" ON public.teams;
 DROP POLICY IF EXISTS "users_select_authenticated" ON public.users;
 DROP POLICY IF EXISTS "users_insert_own_profile" ON public.users;
 DROP POLICY IF EXISTS "users_insert_captain_roster" ON public.users;
@@ -241,6 +245,7 @@ DROP POLICY IF EXISTS "rsvps_select_scoped" ON public.rsvps;
 DROP POLICY IF EXISTS "rsvps_insert_own" ON public.rsvps;
 DROP POLICY IF EXISTS "rsvps_update_own" ON public.rsvps;
 DROP POLICY IF EXISTS "messages_select_authenticated" ON public.messages;
+DROP POLICY IF EXISTS "messages_select_scoped" ON public.messages;
 DROP POLICY IF EXISTS "messages_insert_authenticated" ON public.messages;
 DROP POLICY IF EXISTS "messages_insert_as_self" ON public.messages;
 DROP POLICY IF EXISTS "messages_insert_league_office" ON public.messages;
@@ -253,6 +258,7 @@ REVOKE ALL ON public.rsvps    FROM anon;
 REVOKE ALL ON public.messages FROM anon;
 
 GRANT SELECT ON public.teams    TO authenticated, anon;
+GRANT INSERT ON public.teams    TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.users    TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.matches  TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.rsvps    TO authenticated;
@@ -266,6 +272,12 @@ CREATE POLICY "teams_select_public"
   FOR SELECT
   TO anon, authenticated
   USING (true);
+
+CREATE POLICY "teams_insert_captain"
+  ON public.teams
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (public.is_captain());
 
 -- ---------------------------------------------------------------------------
 -- USERS — profiles linked to auth.users via auth_id
@@ -343,6 +355,13 @@ CREATE POLICY "users_delete_captain_roster"
 -- ---------------------------------------------------------------------------
 -- MATCHES — organizers manage schedule; everyone signed in can view
 -- ---------------------------------------------------------------------------
+ALTER TABLE public.matches
+  ADD COLUMN IF NOT EXISTS home_score integer,
+  ADD COLUMN IF NOT EXISTS away_score integer;
+
+ALTER TABLE public.matches
+  ADD COLUMN IF NOT EXISTS field_address text;
+
 CREATE POLICY "matches_select_authenticated"
   ON public.matches
   FOR SELECT
@@ -430,13 +449,22 @@ CREATE POLICY "rsvps_update_own"
   );
 
 -- ---------------------------------------------------------------------------
--- MESSAGES — STRICT: chat as yourself; organizers may post League Office alerts
+-- MESSAGES — global (team_id NULL) + club chat (team_id = your club)
 -- ---------------------------------------------------------------------------
-CREATE POLICY "messages_select_authenticated"
+ALTER TABLE public.messages
+  ADD COLUMN IF NOT EXISTS team_id bigint REFERENCES public.teams(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_messages_team_id ON public.messages(team_id);
+
+CREATE POLICY "messages_select_scoped"
   ON public.messages
   FOR SELECT
   TO authenticated
-  USING (true);
+  USING (
+    team_id IS NULL
+    OR public.is_organizer()
+    OR team_id = public.auth_user_team_id()
+  );
 
 CREATE POLICY "messages_insert_as_self"
   ON public.messages
@@ -445,6 +473,10 @@ CREATE POLICY "messages_insert_as_self"
   WITH CHECK (
     sender_name = public.auth_user_name()
     AND char_length(trim(text)) > 0
+    AND (
+      team_id IS NULL
+      OR team_id = public.auth_user_team_id()
+    )
   );
 
 CREATE POLICY "messages_insert_league_office"
@@ -454,6 +486,7 @@ CREATE POLICY "messages_insert_league_office"
   WITH CHECK (
     public.is_organizer()
     AND sender_name = 'League Office'
+    AND team_id IS NULL
     AND char_length(trim(text)) > 0
   );
 
@@ -484,12 +517,18 @@ BEGIN
     END IF;
 
     IF NEW.team_id IS DISTINCT FROM OLD.team_id THEN
-      IF OLD.role <> 'Player' THEN
-        RAISE EXCEPTION 'Only players can join or leave a club.';
-      END IF;
-      IF NEW.team_id IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM public.teams t WHERE t.id = NEW.team_id) THEN
-        RAISE EXCEPTION 'Invalid team selected.';
+      IF OLD.role = 'Player' THEN
+        IF NEW.team_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM public.teams t WHERE t.id = NEW.team_id) THEN
+          RAISE EXCEPTION 'Invalid team selected.';
+        END IF;
+      ELSIF OLD.role = 'Captain' THEN
+        IF NEW.team_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM public.teams t WHERE t.id = NEW.team_id) THEN
+          RAISE EXCEPTION 'Invalid team selected.';
+        END IF;
+      ELSE
+        RAISE EXCEPTION 'Only players and captains can change club.';
       END IF;
     END IF;
   END IF;

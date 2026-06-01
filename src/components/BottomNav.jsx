@@ -1,8 +1,9 @@
-import { Calendar, Home, Users } from 'lucide-react';
+import { Calendar, Home, MessageCircle, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const tabs = [
-  { id: 'dashboard', label: 'Dashboard', Icon: Home },
+  { id: 'dashboard', label: 'Home', Icon: Home },
+  { id: 'chat', label: 'Chat', Icon: MessageCircle },
   { id: 'team', label: 'Team', Icon: Users },
   { id: 'schedule', label: 'Schedule', Icon: Calendar },
 ];
