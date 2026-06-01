@@ -1,28 +1,12 @@
--- Add three league teams (safe to re-run)
-INSERT INTO public.teams (id, name, primary_kit_color, away_kit_color) VALUES
-  (5, 'Lakeside Lions', 'Teal', 'Cream'),
-  (6, 'Metro Strikers', 'Purple', 'Silver'),
-  (7, 'Canyon City SC', 'Forest Green', 'Yellow')
-ON CONFLICT (id) DO NOTHING;
-
-SELECT setval(pg_get_serial_sequence('teams', 'id'), (SELECT MAX(id) FROM teams));
-
--- Allow signup screen to list clubs before login
-DROP POLICY IF EXISTS "teams_select_authenticated" ON public.teams;
-DROP POLICY IF EXISTS "teams_select_public" ON public.teams;
-
-CREATE POLICY "teams_select_public"
-  ON public.teams FOR SELECT
-  TO anon, authenticated
-  USING (true);
-
-GRANT SELECT ON public.teams TO anon;
+-- Allow players to leave a club (team_id → NULL) and switch clubs.
+-- Run once in Supabase SQL Editor if Leave club fails silently or with
+-- "You can only update your own display name."
 
 -- Players without a club (organizers already use NULL)
 ALTER TABLE public.users
   ALTER COLUMN team_id DROP NOT NULL;
 
--- Players may join or leave a club (change team_id only)
+-- Players may join, switch, or leave (change team_id only)
 CREATE OR REPLACE FUNCTION public.enforce_profile_update_rules()
 RETURNS TRIGGER
 LANGUAGE plpgsql

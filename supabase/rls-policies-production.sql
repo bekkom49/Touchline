@@ -457,6 +457,10 @@ CREATE POLICY "messages_insert_league_office"
     AND char_length(trim(text)) > 0
   );
 
+-- Players without a club (organizers already use NULL)
+ALTER TABLE public.users
+  ALTER COLUMN team_id DROP NOT NULL;
+
 -- ---------------------------------------------------------------------------
 -- Trigger: profile self-updates — name always; players may join/leave clubs
 -- ---------------------------------------------------------------------------

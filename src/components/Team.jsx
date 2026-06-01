@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import EmptyState from './EmptyState';
 import TeamPicker from './TeamPicker';
 import {
@@ -128,10 +129,13 @@ export default function Team() {
     joinClub,
     leaveClub,
   } = useApp();
+  const { setAuthError } = useAuth();
 
   const [showChat, setShowChat] = useState(false);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [clubBusy, setClubBusy] = useState(false);
+  const [clubMessage, setClubMessage] = useState('');
+  const [clubMessageOk, setClubMessageOk] = useState(true);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
   const [pickedTeamId, setPickedTeamId] = useState(myTeamId ?? teams[0]?.id ?? 1);
@@ -148,13 +152,37 @@ export default function Team() {
 
   async function handleJoinClub(teamId) {
     setClubBusy(true);
-    await joinClub(teamId);
+    setClubMessage('');
+    setAuthError(null);
+    const result = await joinClub(teamId);
+    if (result.ok) {
+      setClubMessageOk(true);
+      setClubMessage('Club updated.');
+    } else {
+      setClubMessageOk(false);
+      setClubMessage(
+        result.error ??
+          'Could not update club. In Supabase, run supabase/allow-player-leave-club.sql, then try again.'
+      );
+    }
     setClubBusy(false);
   }
 
   async function handleLeaveClub() {
     setClubBusy(true);
-    await leaveClub();
+    setClubMessage('');
+    setAuthError(null);
+    const result = await leaveClub();
+    if (result.ok) {
+      setClubMessageOk(true);
+      setClubMessage('You left the club.');
+    } else {
+      setClubMessageOk(false);
+      setClubMessage(
+        result.error ??
+          'Could not leave club. In Supabase, run supabase/allow-player-leave-club.sql, then try again.'
+      );
+    }
     setClubBusy(false);
   }
 
@@ -248,6 +276,11 @@ export default function Team() {
                   </button>
                 )}
               </div>
+              {clubMessage && (
+                <p className={`mt-2 text-xs ${clubMessageOk ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {clubMessage}
+                </p>
+              )}
             </>
           )}
         </div>

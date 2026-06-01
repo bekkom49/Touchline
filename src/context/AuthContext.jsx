@@ -242,7 +242,9 @@ export function AuthProvider({ children }) {
   }
 
   async function joinClub(teamId) {
-    if (!session?.user || profile?.role !== ROLES.PLAYER) return { ok: false };
+    if (!session?.user || profile?.role !== ROLES.PLAYER) {
+      return { ok: false, error: 'Only players can join a club.' };
+    }
 
     const { data, error } = await supabase
       .from('users')
@@ -253,7 +255,7 @@ export function AuthProvider({ children }) {
 
     if (error) {
       setAuthError(error.message);
-      return { ok: false };
+      return { ok: false, error: error.message };
     }
 
     setProfile(data);
@@ -262,7 +264,9 @@ export function AuthProvider({ children }) {
   }
 
   async function leaveClub() {
-    if (!session?.user || profile?.role !== ROLES.PLAYER) return { ok: false };
+    if (!session?.user || profile?.role !== ROLES.PLAYER) {
+      return { ok: false, error: 'Only players can leave a club.' };
+    }
 
     const { data, error } = await supabase
       .from('users')
@@ -273,7 +277,7 @@ export function AuthProvider({ children }) {
 
     if (error) {
       setAuthError(error.message);
-      return { ok: false };
+      return { ok: false, error: error.message };
     }
 
     setProfile(data);
