@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { DEFAULT_TEAM_ID, ROLES } from '../mockData';
+import { DEFAULT_TEAM_ID, ROLES, isPlayerRole } from '../mockData';
 import { supabase } from '../supabaseClient';
 
 const AuthContext = createContext(null);
@@ -242,7 +242,7 @@ export function AuthProvider({ children }) {
   }
 
   async function joinClub(teamId) {
-    if (!session?.user || profile?.role !== ROLES.PLAYER) {
+    if (!session?.user || !isPlayerRole(profile?.role)) {
       return { ok: false, error: 'Only players can join a club.' };
     }
 
@@ -264,7 +264,7 @@ export function AuthProvider({ children }) {
   }
 
   async function leaveClub() {
-    if (!session?.user || profile?.role !== ROLES.PLAYER) {
+    if (!session?.user || !isPlayerRole(profile?.role)) {
       return { ok: false, error: 'Only players can leave a club.' };
     }
 

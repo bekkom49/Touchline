@@ -4,6 +4,28 @@ export const ROLES = {
   PLAYER: 'Player',
 };
 
+/** Match role strings from Supabase even if casing differs. */
+export function normalizeRole(role) {
+  if (!role) return ROLES.PLAYER;
+  const value = String(role).trim();
+  const match = Object.values(ROLES).find(
+    (known) => known.toLowerCase() === value.toLowerCase()
+  );
+  return match ?? value;
+}
+
+export function isPlayerRole(role) {
+  return normalizeRole(role) === ROLES.PLAYER;
+}
+
+export function isCaptainRole(role) {
+  return normalizeRole(role) === ROLES.CAPTAIN;
+}
+
+export function isOrganizerRole(role) {
+  return normalizeRole(role) === ROLES.ORGANIZER;
+}
+
 export const MATCH_STATUS = {
   SCHEDULED: 'Scheduled',
   POSTPONED: 'Postponed',

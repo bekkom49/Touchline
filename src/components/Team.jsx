@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import EmptyState from './EmptyState';
-import TeamPicker from './TeamPicker';
+import TeamPicker, { FALLBACK_TEAMS } from './TeamPicker';
 import {
   ROLES,
   RSVP_STATUS,
   formatMessageTime,
   getTeamById,
+  isCaptainRole,
+  isOrganizerRole,
+  isPlayerRole,
 } from '../mockData';
 
 const rsvpGroups = [
@@ -145,9 +148,11 @@ export default function Team() {
   }, [myTeamId]);
 
   const matchRsvps = nextMatch ? getRsvpsForMatch(nextMatch.id) : [];
-  const isCaptain = activeRole === ROLES.CAPTAIN;
-  const isPlayer = activeRole === ROLES.PLAYER;
-  const currentTeam = myTeamId ? getTeamById(teams, myTeamId) : null;
+  const isCaptain = isCaptainRole(activeRole);
+  const isPlayer = isPlayerRole(activeRole);
+  const isOrganizer = isOrganizerRole(activeRole);
+  const clubTeams = teams.length > 0 ? teams : FALLBACK_TEAMS;
+  const currentTeam = myTeamId ? getTeamById(clubTeams, myTeamId) : null;
   const hasRoster = teamPlayers.length > 0;
 
   async function handleJoinClub(teamId) {
@@ -228,8 +233,8 @@ export default function Team() {
         </div>
       </div>
 
-      {(isPlayer || isCaptain) && (
-        <div className="card-interactive mb-4 rounded-2xl border border-slate-700/50 bg-slate-800/30 p-4">
+      {!isOrganizer && (
+        <div className="card-interactive mb-4 rounded-2xl border-2 border-emerald-600/40 bg-emerald-950/20 p-4 shadow-md shadow-emerald-900/10">
           <h3 className="mb-1 text-sm font-bold text-white">My Club</h3>
           {currentTeam ? (
             <p className="mb-3 text-xs text-slate-400">
@@ -241,21 +246,21 @@ export default function Team() {
             <p className="mb-3 text-xs text-slate-400">
               {isPlayer
                 ? "You're not on a club yet — pick one below to join."
-                : 'No club assigned to your captain profile yet.'}
+                : 'No club assigned to your profile yet.'}
             </p>
           )}
 
-          {isPlayer && (
+          {isPlayer ? (
             <>
               <TeamPicker
-                teams={teams}
+                teams={clubTeams}
                 selectedId={currentTeam ? myTeamId : pickedTeamId}
                 onSelect={setPickedTeamId}
                 label={currentTeam ? 'Switch club' : 'Join a club'}
               />
 
               <div className="mt-3 flex gap-2">
-                {(!currentTeam || pickedTeamId !== myTeamId) && (
+                {(!currentTeam || Number(pickedTeamId) !== Number(myTeamId)) && (
                   <button
                     type="button"
                     disabled={clubBusy || !pickedTeamId}
@@ -272,7 +277,7 @@ export default function Team() {
                     onClick={handleLeaveClub}
                     className="btn-interactive rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-2.5 text-sm font-bold text-red-300 hover:bg-red-950/50 disabled:opacity-40"
                   >
-                    Leave
+                    Leave club
                   </button>
                 )}
               </div>
@@ -282,6 +287,10 @@ export default function Team() {
                 </p>
               )}
             </>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Only players can join or leave clubs. Sign up or sign in with a Player account.
+            </p>
           )}
         </div>
       )}

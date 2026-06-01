@@ -4,6 +4,7 @@ import {
   MATCH_STATUS,
   ROLES,
   RSVP_STATUS,
+  normalizeRole,
 } from '../mockData';
 import { getDefaultTabForRole, useAuth } from './AuthContext';
 import { supabase } from '../supabaseClient';
@@ -31,13 +32,15 @@ export function AppProvider({ children }) {
   const [standings] = useState([]);
   const [matchResults] = useState([]);
 
-  const actingUser = profile ?? {
-    id: 0,
-    name: 'Guest',
-    email: '',
-    role: ROLES.PLAYER,
-    team_id: DEFAULT_TEAM_ID,
-  };
+  const actingUser = profile
+    ? { ...profile, role: normalizeRole(profile.role) }
+    : {
+        id: 0,
+        name: 'Guest',
+        email: '',
+        role: ROLES.PLAYER,
+        team_id: DEFAULT_TEAM_ID,
+      };
 
   const activeRole = actingUser.role;
   const myTeamId = actingUser.team_id ?? null;
