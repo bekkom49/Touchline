@@ -5,11 +5,25 @@ A mobile-first recreational soccer league manager built with Vite, React, and Ta
 ## Quick Start
 
 ```bash
+cd "C:\Users\mokhi\Desktop\AI projects\Touchline"
 npm install
 npm run dev
 ```
 
-Open the URL shown in your terminal (typically `http://localhost:5173`).
+Vite prints a URL like `http://127.0.0.1:5173/` and should open your browser automatically.
+
+**Keep the terminal open** while developing — closing it stops the server.
+
+### Troubleshooting
+
+1. Run `npm install` first (especially after new packages like `lucide-react`).
+2. Use the **exact URL** from the terminal. If 5173 is busy, Vite uses 5174, 5175, etc.
+3. Stop stale servers with `Ctrl+C` in any terminal still running Vite, then run `npm run dev` again.
+4. Fallback without dev server:
+   ```bash
+   npm run build
+   npm run preview
+   ```
 
 ## Features
 

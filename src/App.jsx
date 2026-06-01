@@ -1,12 +1,58 @@
 import { AppProvider, useApp } from './context/AppContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import AuthScreen from './components/AuthScreen';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 import Dashboard from './components/Dashboard';
 import Team from './components/Team';
 import Schedule from './components/Schedule';
 
+function LoadingScreen({ label = 'Loading Touchline…' }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+      <p className="text-sm font-medium text-slate-300">{label}</p>
+    </div>
+  );
+}
+
+function ErrorScreen({ message, onRetry }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+      <p className="text-3xl">⚠️</p>
+      <div>
+        <p className="text-sm font-semibold text-white">Could not load data</p>
+        <p className="mt-1 text-xs text-slate-400">{message}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="btn-interactive rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function AppContent() {
-  const { activeTab } = useApp();
+  const { activeTab, loading, error, refetch } = useApp();
+
+  if (loading) {
+    return (
+      <div className="relative mx-auto flex h-full w-full max-w-md flex-col bg-slate-950">
+        <LoadingScreen />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="relative mx-auto flex h-full w-full max-w-md flex-col bg-slate-950">
+        <ErrorScreen message={error} onRetry={refetch} />
+      </div>
+    );
+  }
 
   return (
     <div className="relative mx-auto flex h-full w-full max-w-md flex-col bg-slate-950 shadow-2xl shadow-black/40">
@@ -38,10 +84,53 @@ function AppContent() {
   );
 }
 
-export default function App() {
+function AuthenticatedApp() {
+  const { session, profile, authLoading, authError, signOut, retryProfile } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div className="relative mx-auto flex h-full w-full max-w-md flex-col bg-slate-950">
+        <LoadingScreen label="Checking session…" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <AuthScreen />;
+  }
+
+  if (!profile) {
+    return (
+      <div className="relative mx-auto flex h-full w-full max-w-md flex-col bg-slate-950 px-6">
+        <ErrorScreen
+          message={
+            authError ??
+            'Your account is signed in but no profile was found. This can happen if RLS blocks profile reads — re-run supabase/rls-policies-production.sql, then retry.'
+          }
+          onRetry={retryProfile}
+        />
+        <button
+          type="button"
+          onClick={signOut}
+          className="btn-interactive mx-auto mb-8 rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300"
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  }
+
   return (
     <AppProvider>
       <AppContent />
     </AppProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthenticatedApp />
+    </AuthProvider>
   );
 }

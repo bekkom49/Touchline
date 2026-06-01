@@ -8,7 +8,7 @@ import {
 } from '../mockData';
 
 export default function Schedule() {
-  const { teams, standings, matchResults, activeRole, createMatch } = useApp();
+  const { teams, standings, matchResults, activeRole, createMatch, myTeamId } = useApp();
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
     homeTeamId: '1',
@@ -139,9 +139,9 @@ export default function Schedule() {
               <span className="text-center">Pts</span>
             </div>
             {sortedStandings.map((row, idx) => {
-              const team = getTeamById(row.team_id);
+              const team = getTeamById(teams, row.team_id);
               const gd = row.goals_for - row.goals_against;
-              const isMyTeam = row.team_id === 1;
+              const isMyTeam = myTeamId != null && row.team_id === myTeamId;
               return (
                 <div
                   key={row.team_id}
@@ -180,8 +180,8 @@ export default function Schedule() {
         ) : (
           <div className="space-y-2">
             {sortedResults.map((result) => {
-              const home = getTeamById(result.home_team_id);
-              const away = getTeamById(result.away_team_id);
+              const home = getTeamById(teams, result.home_team_id);
+              const away = getTeamById(teams, result.away_team_id);
               return (
                 <div
                   key={result.id}

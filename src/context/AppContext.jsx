@@ -1,125 +1,282 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
-  CURRENT_USER_ID,
+  DEFAULT_TEAM_ID,
   MATCH_STATUS,
-  MY_TEAM_ID,
   ROLES,
   RSVP_STATUS,
-  fields as initialFields,
-  matchResults as initialMatchResults,
-  matches as initialMatches,
-  messages as initialMessages,
-  rsvps as initialRsvps,
-  standings as initialStandings,
-  teams as initialTeams,
-  users as initialUsers,
-  getUserById,
 } from '../mockData';
+import { getDefaultTabForRole, useAuth } from './AuthContext';
+import { supabase } from '../supabaseClient';
 
 const AppContext = createContext(null);
 
-function getActingUser(activeRole) {
-  if (activeRole === ROLES.ORGANIZER) {
-    return getUserById(7) ?? initialUsers[0];
-  }
-  if (activeRole === ROLES.CAPTAIN) {
-    return initialUsers.find((u) => u.role === ROLES.CAPTAIN && u.team_id === MY_TEAM_ID) ?? initialUsers[0];
-  }
-  return getUserById(CURRENT_USER_ID) ?? initialUsers[1];
-}
+const DEFAULT_FIELDS = [
+  { id: 1, number: 3, rainout: false },
+  { id: 2, number: 5, rainout: false },
+  { id: 3, number: 7, rainout: true },
+];
 
 export function AppProvider({ children }) {
-  const [activeRole, setActiveRole] = useState(ROLES.PLAYER);
+  const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [users, setUsers] = useState(initialUsers);
-  const [teams] = useState(initialTeams);
-  const [matches, setMatches] = useState(initialMatches);
-  const [rsvps, setRsvps] = useState(initialRsvps);
-  const [messages, setMessages] = useState(initialMessages);
-  const [fields, setFields] = useState(initialFields);
-  const [standings] = useState(initialStandings);
-  const [matchResults] = useState(initialMatchResults);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const actingUser = useMemo(() => getActingUser(activeRole), [activeRole]);
+  const [users, setUsers] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [rsvps, setRsvps] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [fields, setFields] = useState(DEFAULT_FIELDS);
+  const [standings] = useState([]);
+  const [matchResults] = useState([]);
+
+  const actingUser = profile ?? {
+    id: 0,
+    name: 'Guest',
+    email: '',
+    role: ROLES.PLAYER,
+    team_id: DEFAULT_TEAM_ID,
+  };
+
+  const activeRole = actingUser.role;
+  const myTeamId = actingUser.team_id ?? null;
+
+  useEffect(() => {
+    if (profile?.id) {
+      setActiveTab(getDefaultTabForRole(profile.role));
+    }
+  }, [profile?.id, profile?.role]);
 
   const nextMatch = useMemo(() => {
+    const now = new Date();
     const teamMatches = matches
-      .filter(
-        (m) =>
-          (m.home_team_id === MY_TEAM_ID || m.away_team_id === MY_TEAM_ID) &&
-          new Date(m.match_date) >= new Date('2026-05-30T00:00:00')
-      )
+      .filter((m) => {
+        const isUpcoming = new Date(m.match_date) >= now;
+        if (activeRole === ROLES.ORGANIZER) return isUpcoming;
+        return (
+          isUpcoming &&
+          myTeamId != null &&
+          (m.home_team_id === myTeamId || m.away_team_id === myTeamId)
+        );
+      })
       .sort((a, b) => new Date(a.match_date) - new Date(b.match_date));
     return teamMatches[0] ?? null;
-  }, [matches]);
+  }, [matches, myTeamId, activeRole]);
 
-  const teamPlayers = useMemo(
-    () => users.filter((u) => u.team_id === MY_TEAM_ID && u.role === ROLES.PLAYER),
-    [users]
-  );
+  const teamPlayers = useMemo(() => {
+    if (activeRole === ROLES.ORGANIZER) {
+      return users.filter((u) => u.role === ROLES.PLAYER);
+    }
+    return users.filter(
+      (u) => u.team_id === myTeamId && u.role === ROLES.PLAYER
+    );
+  }, [users, myTeamId, activeRole]);
 
-  function updateRsvp(matchId, userId, status) {
-    setRsvps((prev) => {
-      const existing = prev.find((r) => r.match_id === matchId && r.user_id === userId);
-      if (existing) {
-        return prev.map((r) =>
-          r.id === existing.id ? { ...r, status } : r
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    const [teamsRes, usersRes, matchesRes, rsvpsRes, messagesRes] = await Promise.all([
+      supabase.from('teams').select('*').order('id'),
+      supabase.from('users').select('*').order('id'),
+      supabase.from('matches').select('*').order('match_date'),
+      supabase.from('rsvps').select('*'),
+      supabase.from('messages').select('*').order('id', { ascending: true }),
+    ]);
+
+    const errors = [
+      teamsRes.error && `teams: ${teamsRes.error.message}`,
+      usersRes.error && `users: ${usersRes.error.message}`,
+      matchesRes.error && `matches: ${matchesRes.error.message}`,
+      rsvpsRes.error && `rsvps: ${rsvpsRes.error.message}`,
+      messagesRes.error && `messages: ${messagesRes.error.message}`,
+    ].filter(Boolean);
+
+    if (errors.length) {
+      const hint = errors.some((e) => e.includes('permission') || e.includes('42501'))
+        ? ' Sign in and run supabase/rls-policies-production.sql in the Supabase SQL Editor.'
+        : errors.some((e) => e.includes('PGRST125') || e.includes('Invalid path'))
+          ? ' Check VITE_SUPABASE_URL — it must be https://YOUR-REF.supabase.co (no /rest/v1, no dashboard link).'
+          : errors.some((e) => e.includes('PGRST205'))
+            ? ' A table is missing — re-run the schema SQL in Supabase.'
+            : '';
+      setError(`${errors.join(' · ')}.${hint}`);
+      setLoading(false);
+      return;
+    }
+
+    setTeams(teamsRes.data ?? []);
+    setUsers(usersRes.data ?? []);
+    setMatches(matchesRes.data ?? []);
+    setRsvps(rsvpsRes.data ?? []);
+    setMessages(messagesRes.data ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (profile) fetchAll();
+  }, [profile, fetchAll]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('touchline-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === payload.new.id)) return prev;
+            return [...prev, payload.new];
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rsvps' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setRsvps((prev) => {
+              if (prev.some((r) => r.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setRsvps((prev) =>
+              prev.map((r) => (r.id === payload.new.id ? payload.new : r))
+            );
+          } else if (payload.eventType === 'DELETE') {
+            setRsvps((prev) => prev.filter((r) => r.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  async function updateRsvp(matchId, userId, status) {
+    const existing = rsvps.find((r) => r.match_id === matchId && r.user_id === userId);
+
+    if (existing) {
+      setRsvps((prev) =>
+        prev.map((r) => (r.id === existing.id ? { ...r, status } : r))
+      );
+      const { error: updateError } = await supabase
+        .from('rsvps')
+        .update({ status })
+        .eq('id', existing.id);
+
+      if (updateError) {
+        setRsvps((prev) =>
+          prev.map((r) => (r.id === existing.id ? existing : r))
         );
+        console.error('RSVP update failed:', updateError.message);
       }
-      return [
-        ...prev,
-        {
-          id: Math.max(0, ...prev.map((r) => r.id)) + 1,
-          match_id: matchId,
-          user_id: userId,
-          status,
-        },
-      ];
-    });
+      return;
+    }
+
+    const optimistic = {
+      id: `temp-${Date.now()}`,
+      match_id: matchId,
+      user_id: userId,
+      status,
+    };
+    setRsvps((prev) => [...prev, optimistic]);
+
+    const { data, error: insertError } = await supabase
+      .from('rsvps')
+      .insert({ match_id: matchId, user_id: userId, status })
+      .select()
+      .single();
+
+    if (insertError) {
+      setRsvps((prev) => prev.filter((r) => r.id !== optimistic.id));
+      console.error('RSVP insert failed:', insertError.message);
+      return;
+    }
+
+    setRsvps((prev) =>
+      prev.map((r) => (r.id === optimistic.id ? data : r))
+    );
   }
 
   function getRsvpForUser(matchId, userId) {
-    return rsvps.find((r) => r.match_id === matchId && r.user_id === userId)?.status ?? RSVP_STATUS.NO_RESPONSE;
+    return (
+      rsvps.find((r) => r.match_id === matchId && r.user_id === userId)?.status ??
+      RSVP_STATUS.NO_RESPONSE
+    );
   }
 
   function getRsvpsForMatch(matchId) {
     return rsvps.filter((r) => r.match_id === matchId);
   }
 
-  function sendMessage(text) {
+  async function sendMessage(text, senderName = actingUser.name) {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Math.max(0, ...prev.map((m) => m.id)) + 1,
+    const timestamp = new Date().toISOString();
+    const optimistic = {
+      id: `temp-${Date.now()}`,
+      text: trimmed,
+      sender_name: senderName,
+      timestamp,
+    };
+
+    setMessages((prev) => [...prev, optimistic]);
+
+    const { data, error: insertError } = await supabase
+      .from('messages')
+      .insert({
         text: trimmed,
-        sender_name: actingUser.name,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+        sender_name: senderName,
+        timestamp,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      console.error('Message insert failed:', insertError.message);
+      return;
+    }
+
+    setMessages((prev) => {
+      const withoutTemp = prev.filter((m) => m.id !== optimistic.id);
+      if (withoutTemp.some((m) => m.id === data.id)) return withoutTemp;
+      return [...withoutTemp, data];
+    });
   }
 
-  function postponeMatch(matchId) {
-    setMatches((prev) => {
-      const match = prev.find((m) => m.id === matchId);
-      if (!match || match.status === MATCH_STATUS.POSTPONED) return prev;
+  async function postponeMatch(matchId) {
+    const match = matches.find((m) => m.id === matchId);
+    if (!match || match.status === MATCH_STATUS.POSTPONED) return;
 
-      setMessages((msgPrev) => [
-        ...msgPrev,
-        {
-          id: Math.max(0, ...msgPrev.map((m) => m.id)) + 1,
-          text: `⚠️ Match on Field ${match.field_number} has been POSTPONED due to league scheduling. We'll share a new date soon.`,
-          sender_name: 'League Office',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-
-      return prev.map((m) =>
+    setMatches((prev) =>
+      prev.map((m) =>
         m.id === matchId ? { ...m, status: MATCH_STATUS.POSTPONED } : m
+      )
+    );
+
+    const { error: matchError } = await supabase
+      .from('matches')
+      .update({ status: MATCH_STATUS.POSTPONED })
+      .eq('id', matchId);
+
+    if (matchError) {
+      setMatches((prev) =>
+        prev.map((m) => (m.id === matchId ? match : m))
       );
-    });
+      console.error('Postpone match failed:', matchError.message);
+      return;
+    }
+
+    await sendMessage(
+      `⚠️ Match on Field ${match.field_number} has been POSTPONED due to league scheduling. We'll share a new date soon.`,
+      'League Office'
+    );
   }
 
   function toggleFieldRainout(fieldNumber) {
@@ -130,52 +287,63 @@ export function AppProvider({ children }) {
     );
   }
 
-  function nudgePlayer(userId) {
+  async function nudgePlayer(userId) {
     const player = users.find((u) => u.id === userId);
     if (!player || !nextMatch) return;
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Math.max(0, ...prev.map((m) => m.id)) + 1,
-        text: `@${player.name.split(' ')[0]} — please RSVP for our upcoming match!`,
-        sender_name: actingUser.name,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+    await sendMessage(
+      `@${player.name.split(' ')[0]} — please RSVP for our upcoming match!`
+    );
   }
 
-  function addPlayer(name, email) {
+  async function addPlayer(name, email) {
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
-    if (!trimmedName || !trimmedEmail) return;
+    if (!trimmedName || !trimmedEmail || myTeamId == null) return;
 
-    setUsers((prev) => [
-      ...prev,
-      {
-        id: Math.max(0, ...prev.map((u) => u.id)) + 1,
+    const { data, error: insertError } = await supabase
+      .from('users')
+      .insert({
         name: trimmedName,
         email: trimmedEmail,
         role: ROLES.PLAYER,
-        team_id: MY_TEAM_ID,
-      },
-    ]);
+        team_id: myTeamId,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('Add player failed:', insertError.message);
+      return;
+    }
+
+    setUsers((prev) => [...prev, data]);
   }
 
-  function removePlayer(userId) {
+  async function removePlayer(userId) {
+    const removedUser = users.find((u) => u.id === userId);
+    const removedRsvps = rsvps.filter((r) => r.user_id === userId);
+
     setUsers((prev) => prev.filter((u) => u.id !== userId));
     setRsvps((prev) => prev.filter((r) => r.user_id !== userId));
+
+    const { error: deleteError } = await supabase.from('users').delete().eq('id', userId);
+
+    if (deleteError) {
+      if (removedUser) setUsers((prev) => [...prev, removedUser]);
+      setRsvps((prev) => [...prev, ...removedRsvps]);
+      console.error('Remove player failed:', deleteError.message);
+    }
   }
 
-  function createMatch({ homeTeamId, awayTeamId, matchDate, fieldNumber }) {
+  async function createMatch({ homeTeamId, awayTeamId, matchDate, fieldNumber }) {
     const homeTeam = teams.find((t) => t.id === homeTeamId);
     const awayTeam = teams.find((t) => t.id === awayTeamId);
     if (!homeTeam || !awayTeam) return;
 
-    setMatches((prev) => [
-      ...prev,
-      {
-        id: Math.max(0, ...prev.map((m) => m.id)) + 1,
+    const { data, error: insertError } = await supabase
+      .from('matches')
+      .insert({
         home_team_id: homeTeamId,
         away_team_id: awayTeamId,
         match_date: matchDate,
@@ -183,15 +351,27 @@ export function AppProvider({ children }) {
         status: MATCH_STATUS.SCHEDULED,
         assigned_home_kit: homeTeam.primary_kit_color,
         assigned_away_kit: awayTeam.away_kit_color,
-      },
-    ]);
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('Create match failed:', insertError.message);
+      return;
+    }
+
+    setMatches((prev) =>
+      [...prev, data].sort((a, b) => new Date(a.match_date) - new Date(b.match_date))
+    );
   }
 
   const value = {
     activeRole,
-    setActiveRole,
     activeTab,
     setActiveTab,
+    loading,
+    error,
+    refetch: fetchAll,
     actingUser,
     users,
     teams,
@@ -203,7 +383,7 @@ export function AppProvider({ children }) {
     matchResults,
     nextMatch,
     teamPlayers,
-    myTeamId: MY_TEAM_ID,
+    myTeamId,
     updateRsvp,
     getRsvpForUser,
     getRsvpsForMatch,

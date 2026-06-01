@@ -24,6 +24,7 @@ export default function Dashboard() {
     actingUser,
     nextMatch,
     myTeamId,
+    teams,
     updateRsvp,
     getRsvpForUser,
     postponeMatch,
@@ -49,9 +50,14 @@ export default function Dashboard() {
     );
   }
 
-  const isHome = nextMatch.home_team_id === myTeamId;
+  const homeTeam = getTeamById(teams, nextMatch.home_team_id);
+  const awayTeam = getTeamById(teams, nextMatch.away_team_id);
+  const isOnTeam =
+    myTeamId != null &&
+    (nextMatch.home_team_id === myTeamId || nextMatch.away_team_id === myTeamId);
+  const isHome = myTeamId != null && nextMatch.home_team_id === myTeamId;
   const opponentId = isHome ? nextMatch.away_team_id : nextMatch.home_team_id;
-  const opponent = getTeamById(opponentId);
+  const opponent = getTeamById(teams, opponentId);
   const myKit = isHome ? nextMatch.assigned_home_kit : nextMatch.assigned_away_kit;
   const opponentKit = isHome ? nextMatch.assigned_away_kit : nextMatch.assigned_home_kit;
   const isPostponed = nextMatch.status === MATCH_STATUS.POSTPONED;
@@ -97,12 +103,25 @@ export default function Dashboard() {
 
         <div className="space-y-4 p-4">
           <div className="text-center">
-            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-              {isHome ? 'Home vs' : 'Away @'}
-            </p>
-            <p className="mt-1 text-2xl font-extrabold tracking-tight text-white">
-              {opponent?.name}
-            </p>
+            {isOnTeam ? (
+              <>
+                <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                  {isHome ? 'Home vs' : 'Away @'}
+                </p>
+                <p className="mt-1 text-2xl font-extrabold tracking-tight text-white">
+                  {opponent?.name}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                  Matchup
+                </p>
+                <p className="mt-1 text-xl font-extrabold tracking-tight text-white">
+                  {homeTeam?.name} vs {awayTeam?.name}
+                </p>
+              </>
+            )}
           </div>
 
           <div className="flex justify-center gap-8">
@@ -131,8 +150,17 @@ export default function Dashboard() {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <KitBadge label="Your kit" color={myKit} />
-            <KitBadge label="Opponent kit" color={opponentKit} />
+            {isOnTeam ? (
+              <>
+                <KitBadge label="Your kit" color={myKit} />
+                <KitBadge label="Opponent kit" color={opponentKit} />
+              </>
+            ) : (
+              <>
+                <KitBadge label="Home kit" color={nextMatch.assigned_home_kit} />
+                <KitBadge label="Away kit" color={nextMatch.assigned_away_kit} />
+              </>
+            )}
           </div>
 
           {canRsvp && (
