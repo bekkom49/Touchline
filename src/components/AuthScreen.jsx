@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Calendar, Shield, User, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ROLES } from '../mockData';
+import TeamPicker, { useTeams } from './TeamPicker';
 
 const roleOptions = [
   {
@@ -26,6 +27,7 @@ const roleOptions = [
 
 export default function AuthScreen() {
   const { signIn, signUp, authError, setAuthError } = useAuth();
+  const { teams } = useTeams();
   const [mode, setMode] = useState('login');
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -35,6 +37,7 @@ export default function AuthScreen() {
     email: '',
     password: '',
     role: ROLES.PLAYER,
+    teamId: 1,
   });
 
   function switchMode(nextMode) {
@@ -55,6 +58,10 @@ export default function AuthScreen() {
       } else {
         if (!form.name.trim()) {
           setAuthError('Please enter your name.');
+          return;
+        }
+        if (form.role !== ROLES.ORGANIZER && !form.teamId) {
+          setAuthError('Please choose a club to join.');
           return;
         }
         const result = await signUp(form);
@@ -161,6 +168,15 @@ export default function AuthScreen() {
                   })}
                 </div>
               </div>
+
+              {form.role !== ROLES.ORGANIZER && (
+                <TeamPicker
+                  teams={teams}
+                  selectedId={form.teamId}
+                  onSelect={(teamId) => setForm({ ...form, teamId })}
+                  label="Join a club"
+                />
+              )}
             </>
           )}
 

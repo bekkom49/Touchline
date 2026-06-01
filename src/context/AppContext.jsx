@@ -17,7 +17,7 @@ const DEFAULT_FIELDS = [
 ];
 
 export function AppProvider({ children }) {
-  const { profile } = useAuth();
+  const { profile, joinClub: authJoinClub, leaveClub: authLeaveClub } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -365,6 +365,18 @@ export function AppProvider({ children }) {
     );
   }
 
+  async function joinClub(teamId) {
+    const result = await authJoinClub(teamId);
+    if (result.ok) await fetchAll();
+    return result;
+  }
+
+  async function leaveClub() {
+    const result = await authLeaveClub();
+    if (result.ok) await fetchAll();
+    return result;
+  }
+
   const value = {
     activeRole,
     activeTab,
@@ -394,6 +406,8 @@ export function AppProvider({ children }) {
     addPlayer,
     removePlayer,
     createMatch,
+    joinClub,
+    leaveClub,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

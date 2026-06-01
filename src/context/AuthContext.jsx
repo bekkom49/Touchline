@@ -4,14 +4,15 @@ import { supabase } from '../supabaseClient';
 
 const AuthContext = createContext(null);
 
-function buildProfilePayload(authUser, { name, role }) {
-  const teamId = role === ROLES.ORGANIZER ? null : DEFAULT_TEAM_ID;
+function buildProfilePayload(authUser, { name, role, teamId }) {
+  const resolvedTeamId =
+    role === ROLES.ORGANIZER ? null : teamId ?? DEFAULT_TEAM_ID;
   return {
     auth_id: authUser.id,
     name: name.trim(),
     email: authUser.email,
     role,
-    team_id: teamId,
+    team_id: resolvedTeamId,
   };
 }
 
@@ -67,12 +68,14 @@ async function ensureUserProfile(authUser, signupMeta) {
   }
 
   if (authUser.user_metadata?.role) {
+    const metaTeamId = authUser.user_metadata.team_id;
     const { data, error } = await supabase
       .from('users')
       .insert(
         buildProfilePayload(authUser, {
           name: authUser.user_metadata.name ?? authUser.email.split('@')[0],
           role: authUser.user_metadata.role,
+          teamId: metaTeamId != null ? Number(metaTeamId) : DEFAULT_TEAM_ID,
         })
       )
       .select()
@@ -187,9 +190,15 @@ export function AuthProvider({ children }) {
     return { ok: true, role: userProfile.role };
   }
 
-  async function signUp({ name, email, password, role }) {
+  async function signUp({ name, email, password, role, teamId }) {
     setAuthError(null);
-    const teamId = role === ROLES.ORGANIZER ? null : DEFAULT_TEAM_ID;
+
+    if (role !== ROLES.ORGANIZER && !teamId) {
+      setAuthError('Please choose a club to join.');
+      return { ok: false, needsEmailConfirm: false, role: null };
+    }
+
+    const resolvedTeamId = role === ROLES.ORGANIZER ? null : Number(teamId);
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -198,18 +207,26 @@ export function AuthProvider({ children }) {
         data: {
           name: name.trim(),
           role,
-          team_id: teamId,
+          team_id: resolvedTeamId,
         },
       },
     });
 
     if (error) {
-      setAuthError(error.message);
+      const message =
+        error.message === 'Database error saving new user'
+          ? 'Sign-up failed while creating your profile. In Supabase, run supabase/fix-signup-trigger.sql, then try again (or sign in if you already registered).'
+          : error.message;
+      setAuthError(message);
       return { ok: false, needsEmailConfirm: false, role: null };
     }
 
     if (data.session?.user) {
-      const userProfile = await loadProfile(data.session.user, { name, role });
+      const userProfile = await loadProfile(data.session.user, {
+        name,
+        role,
+        teamId: resolvedTeamId,
+      });
       return {
         ok: true,
         needsEmailConfirm: false,
@@ -222,6 +239,46 @@ export function AuthProvider({ children }) {
       needsEmailConfirm: true,
       role,
     };
+  }
+
+  async function joinClub(teamId) {
+    if (!session?.user || profile?.role !== ROLES.PLAYER) return { ok: false };
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({ team_id: Number(teamId) })
+      .eq('auth_id', session.user.id)
+      .select()
+      .single();
+
+    if (error) {
+      setAuthError(error.message);
+      return { ok: false };
+    }
+
+    setProfile(data);
+    setAuthError(null);
+    return { ok: true, profile: data };
+  }
+
+  async function leaveClub() {
+    if (!session?.user || profile?.role !== ROLES.PLAYER) return { ok: false };
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({ team_id: null })
+      .eq('auth_id', session.user.id)
+      .select()
+      .single();
+
+    if (error) {
+      setAuthError(error.message);
+      return { ok: false };
+    }
+
+    setProfile(data);
+    setAuthError(null);
+    return { ok: true, profile: data };
   }
 
   async function signOut() {
@@ -240,6 +297,8 @@ export function AuthProvider({ children }) {
     signIn,
     signUp,
     signOut,
+    joinClub,
+    leaveClub,
     retryProfile: async () => {
       if (!session?.user) return;
       setAuthError(null);

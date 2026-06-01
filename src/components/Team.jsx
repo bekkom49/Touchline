@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import EmptyState from './EmptyState';
+import TeamPicker from './TeamPicker';
 import {
   ROLES,
   RSVP_STATUS,
   formatMessageTime,
+  getTeamById,
 } from '../mockData';
 
 const rsvpGroups = [
@@ -113,21 +115,48 @@ function TeamChat({ onBack }) {
 export default function Team() {
   const {
     activeRole,
+    actingUser,
     teamPlayers,
+    teams,
+    myTeamId,
     nextMatch,
     messages,
     getRsvpsForMatch,
     nudgePlayer,
     addPlayer,
     removePlayer,
+    joinClub,
+    leaveClub,
   } = useApp();
 
   const [showChat, setShowChat] = useState(false);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
+  const [clubBusy, setClubBusy] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
+  const [pickedTeamId, setPickedTeamId] = useState(myTeamId ?? teams[0]?.id ?? 1);
+
+  useEffect(() => {
+    if (myTeamId) setPickedTeamId(myTeamId);
+  }, [myTeamId]);
 
   const matchRsvps = nextMatch ? getRsvpsForMatch(nextMatch.id) : [];
+  const isCaptain = activeRole === ROLES.CAPTAIN;
+  const isPlayer = activeRole === ROLES.PLAYER;
+  const currentTeam = myTeamId ? getTeamById(teams, myTeamId) : null;
+  const hasRoster = teamPlayers.length > 0;
+
+  async function handleJoinClub(teamId) {
+    setClubBusy(true);
+    await joinClub(teamId);
+    setClubBusy(false);
+  }
+
+  async function handleLeaveClub() {
+    setClubBusy(true);
+    await leaveClub();
+    setClubBusy(false);
+  }
 
   function getPlayerRsvp(userId) {
     return matchRsvps.find((r) => r.user_id === userId)?.status ?? RSVP_STATUS.NO_RESPONSE;
@@ -144,9 +173,6 @@ export default function Team() {
     setNewPlayerEmail('');
     setShowAddPlayer(false);
   }
-
-  const isCaptain = activeRole === ROLES.CAPTAIN;
-  const hasRoster = teamPlayers.length > 0;
 
   if (showChat) {
     return <TeamChat onBack={() => setShowChat(false)} />;
@@ -173,6 +199,59 @@ export default function Team() {
           )}
         </div>
       </div>
+
+      {(isPlayer || isCaptain) && (
+        <div className="card-interactive mb-4 rounded-2xl border border-slate-700/50 bg-slate-800/30 p-4">
+          <h3 className="mb-1 text-sm font-bold text-white">My Club</h3>
+          {currentTeam ? (
+            <p className="mb-3 text-xs text-slate-400">
+              You&apos;re with{' '}
+              <span className="font-semibold text-emerald-400">{currentTeam.name}</span>
+              {isCaptain && ' — captains manage this roster'}
+            </p>
+          ) : (
+            <p className="mb-3 text-xs text-slate-400">
+              {isPlayer
+                ? "You're not on a club yet — pick one below to join."
+                : 'No club assigned to your captain profile yet.'}
+            </p>
+          )}
+
+          {isPlayer && (
+            <>
+              <TeamPicker
+                teams={teams}
+                selectedId={currentTeam ? myTeamId : pickedTeamId}
+                onSelect={setPickedTeamId}
+                label={currentTeam ? 'Switch club' : 'Join a club'}
+              />
+
+              <div className="mt-3 flex gap-2">
+                {(!currentTeam || pickedTeamId !== myTeamId) && (
+                  <button
+                    type="button"
+                    disabled={clubBusy || !pickedTeamId}
+                    onClick={() => handleJoinClub(pickedTeamId)}
+                    className="btn-interactive flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
+                  >
+                    {currentTeam ? 'Switch club' : 'Join club'}
+                  </button>
+                )}
+                {currentTeam && (
+                  <button
+                    type="button"
+                    disabled={clubBusy}
+                    onClick={handleLeaveClub}
+                    className="btn-interactive rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-2.5 text-sm font-bold text-red-300 hover:bg-red-950/50 disabled:opacity-40"
+                  >
+                    Leave
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <button
         type="button"

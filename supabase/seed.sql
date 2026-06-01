@@ -4,7 +4,10 @@ INSERT INTO teams (id, name, primary_kit_color, away_kit_color) VALUES
   (1, 'Emerald City FC', 'Emerald Green', 'White'),
   (2, 'Harbor United', 'Navy Blue', 'Sky Blue'),
   (3, 'Riverside Rovers', 'Maroon', 'Gold'),
-  (4, 'Summit Athletic', 'Black', 'Orange')
+  (4, 'Summit Athletic', 'Black', 'Orange'),
+  (5, 'Lakeside Lions', 'Teal', 'Cream'),
+  (6, 'Metro Strikers', 'Purple', 'Silver'),
+  (7, 'Canyon City SC', 'Forest Green', 'Yellow')
 ON CONFLICT (id) DO NOTHING;
 
 SELECT setval(pg_get_serial_sequence('teams', 'id'), (SELECT MAX(id) FROM teams));
