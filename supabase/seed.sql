@@ -10,7 +10,9 @@ INSERT INTO teams (id, name, primary_kit_color, away_kit_color) VALUES
   (7, 'Canyon City SC', 'Forest Green', 'Yellow')
 ON CONFLICT (id) DO NOTHING;
 
-SELECT setval(pg_get_serial_sequence('teams', 'id'), (SELECT MAX(id) FROM teams));
+DO $$ BEGIN
+  PERFORM setval(pg_get_serial_sequence('public.teams', 'id'), (SELECT MAX(id) FROM public.teams));
+END $$;
 
 INSERT INTO users (id, name, email, role, team_id) VALUES
   (1, 'Alex Morgan', 'alex@touchline.local', 'Captain', 1),
@@ -22,14 +24,18 @@ INSERT INTO users (id, name, email, role, team_id) VALUES
   (7, 'Taylor Kim', 'taylor@touchline.local', 'Organizer', NULL)
 ON CONFLICT (id) DO NOTHING;
 
-SELECT setval(pg_get_serial_sequence('users', 'id'), (SELECT MAX(id) FROM users));
+DO $$ BEGIN
+  PERFORM setval(pg_get_serial_sequence('public.users', 'id'), (SELECT MAX(id) FROM public.users));
+END $$;
 
 INSERT INTO matches (id, home_team_id, away_team_id, match_date, field_number, status, assigned_home_kit, assigned_away_kit) VALUES
   (1, 1, 2, '2026-06-07T10:00:00+00', 3, 'Scheduled', 'Emerald Green', 'Sky Blue'),
   (2, 3, 1, '2026-06-14T11:30:00+00', 5, 'Scheduled', 'Maroon', 'White')
 ON CONFLICT (id) DO NOTHING;
 
-SELECT setval(pg_get_serial_sequence('matches', 'id'), (SELECT MAX(id) FROM matches));
+DO $$ BEGIN
+  PERFORM setval(pg_get_serial_sequence('public.matches', 'id'), (SELECT MAX(id) FROM public.matches));
+END $$;
 
 INSERT INTO rsvps (id, match_id, user_id, status) VALUES
   (1, 1, 2, 'Going'),
@@ -44,7 +50,9 @@ INSERT INTO rsvps (id, match_id, user_id, status) VALUES
   (10, 2, 6, 'No Response')
 ON CONFLICT (id) DO NOTHING;
 
-SELECT setval(pg_get_serial_sequence('rsvps', 'id'), (SELECT MAX(id) FROM rsvps));
+DO $$ BEGIN
+  PERFORM setval(pg_get_serial_sequence('public.rsvps', 'id'), (SELECT MAX(id) FROM public.rsvps));
+END $$;
 
 INSERT INTO messages (id, text, sender_name, "timestamp") VALUES
   (1, 'Practice moved to Thursday — same time, Field 5.', 'Alex Morgan', '2026-05-28T18:30:00+00'),
@@ -52,4 +60,6 @@ INSERT INTO messages (id, text, sender_name, "timestamp") VALUES
   (3, 'Harbor United is tough — we need full squad Saturday.', 'Alex Morgan', '2026-05-29T09:15:00+00')
 ON CONFLICT (id) DO NOTHING;
 
-SELECT setval(pg_get_serial_sequence('messages', 'id'), (SELECT MAX(id) FROM messages));
+DO $$ BEGIN
+  PERFORM setval(pg_get_serial_sequence('public.messages', 'id'), (SELECT MAX(id) FROM public.messages));
+END $$;

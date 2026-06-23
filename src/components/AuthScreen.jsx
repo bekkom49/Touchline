@@ -3,7 +3,11 @@ import { Calendar, Shield, User, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ROLES } from '../mockData';
 import TeamPicker, { useTeams } from './TeamPicker';
-import { supabase, getAuthPersistencePreference } from '../supabaseClient';
+import {
+  supabase,
+  getAuthPersistencePreference,
+  formatSupabaseNetworkError,
+} from '../supabaseClient';
 
 const roleOptions = [
   {
@@ -41,7 +45,7 @@ async function lookupTeamIdByInviteCode(code) {
 }
 
 export default function AuthScreen() {
-  const { signIn, signUp, authError, setAuthError } = useAuth();
+  const { signIn, signUp, authError, authErrorDetail, setAuthError, clearAuthFailure } = useAuth();
   const { teams } = useTeams();
   const [mode, setMode] = useState('login');
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +72,7 @@ export default function AuthScreen() {
 
   function switchMode(nextMode) {
     setMode(nextMode);
-    setAuthError(null);
+    clearAuthFailure();
     setSuccessMessage('');
   }
 
@@ -83,12 +87,15 @@ export default function AuthScreen() {
   async function handleSubmit(e) {
     e.preventDefault();
     setSubmitting(true);
-    setAuthError(null);
+    clearAuthFailure();
     setSuccessMessage('');
 
     try {
       if (mode === 'login') {
-        await signIn(form.email, form.password, { staySignedIn });
+        const result = await signIn(form.email, form.password, { staySignedIn });
+        if (!result.ok) {
+          console.error('[Touchline Auth] Login failed on client', result.error ?? authErrorDetail);
+        }
       } else {
         if (!form.name.trim()) {
           setAuthError('Please enter your name.');
@@ -112,6 +119,8 @@ export default function AuthScreen() {
           switchMode('login');
         }
       }
+    } catch (err) {
+      setAuthError(formatSupabaseNetworkError(err?.message ?? String(err)));
     } finally {
       setSubmitting(false);
     }
@@ -258,6 +267,11 @@ export default function AuthScreen() {
             <input
               type="email"
               required
+              autoComplete="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               placeholder="you@email.com"
@@ -273,6 +287,7 @@ export default function AuthScreen() {
               type="password"
               required
               minLength={6}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               placeholder="At least 6 characters"
@@ -293,8 +308,25 @@ export default function AuthScreen() {
           )}
 
           {authError && (
-            <div className="animate-fade-in rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200">
-              {authError}
+            <div
+              className="animate-fade-in rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200"
+              role="alert"
+            >
+              <p className="font-semibold text-red-100">
+                {authErrorDetail?.title ?? 'Sign-in failed'}
+              </p>
+              <p className="mt-1">{authErrorDetail?.message ?? authError}</p>
+              {authErrorDetail?.stage && (
+                <p className="mt-2 text-[10px] uppercase tracking-wider text-red-300/70">
+                  Reason: {authErrorDetail.stage}
+                  {authErrorDetail.code ? ` · ${authErrorDetail.code}` : ''}
+                </p>
+              )}
+              {authErrorDetail?.diagnostics?.usingMemoryFallback && (
+                <p className="mt-2 text-xs text-red-200/90">
+                  Private browsing may be blocking saved sessions on this device.
+                </p>
+              )}
             </div>
           )}
 

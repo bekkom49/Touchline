@@ -1,6 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { ROLES, resolveSignupTeamId, isPlayerRole } from '../mockData';
-import { supabase, clearStoredAuthSession, setAuthPersistence } from '../supabaseClient';
+import {
+  supabase,
+  clearStoredAuthSession,
+  setAuthPersistence,
+  formatSupabaseNetworkError,
+  verifyAuthSessionPersisted,
+  getAuthStorageDiagnostics,
+} from '../supabaseClient';
+import {
+  AUTH_ERROR_STAGE,
+  classifyAuthError,
+  logAuthFailure,
+} from '../authErrors';
 
 const AuthContext = createContext(null);
 
@@ -99,6 +111,26 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
+  const [authErrorDetail, setAuthErrorDetail] = useState(null);
+
+  function applyAuthFailure(error, stage, context) {
+    const classified = classifyAuthError(error, stage);
+    const networkMessage = formatSupabaseNetworkError(classified.raw);
+    const display = {
+      ...classified,
+      message: networkMessage !== classified.raw ? networkMessage : classified.message,
+      diagnostics: getAuthStorageDiagnostics(),
+    };
+    logAuthFailure(context, display);
+    setAuthErrorDetail(display);
+    setAuthError(`${display.title}: ${display.message}`);
+    return display;
+  }
+
+  function clearAuthFailure() {
+    setAuthError(null);
+    setAuthErrorDetail(null);
+  }
 
   const loadProfile = useCallback(async (authUser, signupMeta) => {
     const userProfile = await ensureUserProfile(authUser, signupMeta);
@@ -115,7 +147,7 @@ export function AuthProvider({ children }) {
         if (!mounted) return;
 
         if (error) {
-          setAuthError(error.message);
+          applyAuthFailure(error, AUTH_ERROR_STAGE.SESSION, 'initSession.getSession');
           return;
         }
 
@@ -125,12 +157,12 @@ export function AuthProvider({ children }) {
           try {
             await loadProfile(data.session.user);
           } catch (err) {
-            setAuthError(err.message ?? 'Could not load your profile.');
+            applyAuthFailure(err, AUTH_ERROR_STAGE.PROFILE, 'initSession.loadProfile');
           }
         }
       } catch (err) {
         if (mounted) {
-          setAuthError(err.message ?? 'Session check failed.');
+          applyAuthFailure(err, AUTH_ERROR_STAGE.SESSION, 'initSession');
         }
       } finally {
         if (mounted) setAuthLoading(false);
@@ -152,13 +184,15 @@ export function AuthProvider({ children }) {
       if (nextSession?.user) {
         setTimeout(() => {
           loadProfile(nextSession.user).catch((err) => {
-            setAuthError(err.message ?? 'Could not load your profile.');
+            applyAuthFailure(err, AUTH_ERROR_STAGE.PROFILE, 'onAuthStateChange.loadProfile');
             setProfile(null);
           });
         }, 0);
       } else {
         setProfile(null);
-        setAuthError(null);
+        if (event === 'SIGNED_OUT') {
+          clearAuthFailure();
+        }
       }
     });
 
@@ -169,37 +203,99 @@ export function AuthProvider({ children }) {
   }, [loadProfile]);
 
   async function signIn(email, password, { staySignedIn = true } = {}) {
-    setAuthError(null);
+    clearAuthFailure();
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail || !trimmedPassword) {
+      const detail = applyAuthFailure(
+        new Error('Email and password are required.'),
+        AUTH_ERROR_STAGE.AUTH,
+        'signIn.validation'
+      );
+      return { ok: false, role: null, error: detail };
+    }
+
+    const storageDiag = getAuthStorageDiagnostics();
+    if (storageDiag.usingMemoryFallback) {
+      console.warn('[Touchline Auth] Browser blocked persistent storage.', storageDiag);
+    }
+
     setAuthPersistence(staySignedIn);
     clearStoredAuthSession();
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password: trimmedPassword,
+      });
 
-    if (error) {
-      setAuthError(error.message);
-      return { ok: false, role: null };
+      if (error) {
+        const detail = applyAuthFailure(error, AUTH_ERROR_STAGE.AUTH, 'signIn.signInWithPassword');
+        return { ok: false, role: null, error: detail };
+      }
+
+      if (!data.session) {
+        const detail = applyAuthFailure(
+          new Error('No session returned after sign-in.'),
+          AUTH_ERROR_STAGE.SESSION,
+          'signIn.noSession'
+        );
+        return { ok: false, role: null, error: detail };
+      }
+
+      setSession(data.session);
+
+      const persisted = await verifyAuthSessionPersisted(supabase);
+      if (!persisted.ok) {
+        const stage = storageDiag.usingMemoryFallback
+          ? AUTH_ERROR_STAGE.STORAGE
+          : AUTH_ERROR_STAGE.SESSION;
+        const detail = applyAuthFailure(
+          persisted.error ?? new Error('Session could not be initialized.'),
+          stage,
+          'signIn.verifySession'
+        );
+        return { ok: false, role: null, error: detail };
+      }
+
+      let userProfile;
+      try {
+        userProfile = await loadProfile(data.user);
+      } catch (profileErr) {
+        const detail = applyAuthFailure(profileErr, AUTH_ERROR_STAGE.PROFILE, 'signIn.loadProfile');
+        return { ok: false, role: null, error: detail };
+      }
+
+      if (!userProfile) {
+        const detail = applyAuthFailure(
+          new Error('Account found, but no profile exists yet.'),
+          AUTH_ERROR_STAGE.PROFILE,
+          'signIn.missingProfile'
+        );
+        return { ok: false, role: null, error: detail };
+      }
+
+      clearAuthFailure();
+      return { ok: true, role: userProfile.role, error: null };
+    } catch (err) {
+      const detail = applyAuthFailure(err, AUTH_ERROR_STAGE.UNKNOWN, 'signIn.unexpected');
+      return { ok: false, role: null, error: detail };
     }
-
-    const userProfile = await loadProfile(data.user);
-    if (!userProfile) {
-      setAuthError('Account found, but no profile exists yet. Try signing up again or contact your organizer.');
-      return { ok: false, role: null };
-    }
-
-    return { ok: true, role: userProfile.role };
   }
 
   async function signUp({ name, email, password, role, teamId }) {
-    setAuthError(null);
+    clearAuthFailure();
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
 
     const resolvedTeamId = resolveSignupTeamId(role, teamId);
 
     const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
+      email: trimmedEmail,
+      password: trimmedPassword,
       options: {
         data: {
           name: name.trim(),
@@ -210,11 +306,12 @@ export function AuthProvider({ children }) {
     });
 
     if (error) {
-      const message =
-        error.message === 'Database error saving new user'
-          ? 'Sign-up failed while creating your profile. In Supabase, run supabase/fix-signup-trigger.sql, then try again (or sign in if you already registered).'
-          : error.message;
-      setAuthError(message);
+      let message = formatSupabaseNetworkError(error.message);
+      if (message === error.message && error.message === 'Database error saving new user') {
+        message =
+          'Sign-up failed while creating your profile. In Supabase, run supabase/new-project-setup.sql, then try again (or sign in if you already registered).';
+      }
+      applyAuthFailure({ ...error, message }, AUTH_ERROR_STAGE.AUTH, 'signUp');
       return { ok: false, needsEmailConfirm: false, role: null };
     }
 
@@ -305,7 +402,7 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
-    setAuthError(null);
+    clearAuthFailure();
     await supabase.auth.signOut();
     setSession(null);
     setProfile(null);
@@ -316,7 +413,15 @@ export function AuthProvider({ children }) {
     profile,
     authLoading,
     authError,
-    setAuthError,
+    authErrorDetail,
+    setAuthError: (message) => {
+      if (!message) {
+        clearAuthFailure();
+        return;
+      }
+      setAuthError(message);
+    },
+    clearAuthFailure,
     signIn,
     signUp,
     signOut,
@@ -325,8 +430,12 @@ export function AuthProvider({ children }) {
     joinClubByInviteCode,
     retryProfile: async () => {
       if (!session?.user) return;
-      setAuthError(null);
-      await loadProfile(session.user);
+      clearAuthFailure();
+      try {
+        await loadProfile(session.user);
+      } catch (err) {
+        applyAuthFailure(err, AUTH_ERROR_STAGE.PROFILE, 'retryProfile');
+      }
     },
   };
 

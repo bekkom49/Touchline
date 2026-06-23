@@ -41,9 +41,12 @@ const supabase = createClient(url, key);
 
 const tables = ['teams', 'users', 'matches', 'rsvps', 'messages'];
 
+let fetchFailed = false;
+
 for (const table of tables) {
   const { data, error } = await supabase.from(table).select('*').limit(1);
   if (error) {
+    if (/fetch failed/i.test(error.message)) fetchFailed = true;
     console.error(`FAIL ${table}:`, error.message, `(code: ${error.code})`);
     if (error.code === '42501' || error.message?.includes('permission')) {
       console.error('  → Run supabase/rls-policies.sql in the Supabase SQL Editor.');
@@ -54,4 +57,12 @@ for (const table of tables) {
   } else {
     console.log(`OK   ${table}:`, `${data?.length ?? 0} row(s) sampled`);
   }
+}
+
+if (fetchFailed) {
+  console.error('\nCannot reach Supabase. Check:');
+  console.error('  1. Project URL in .env matches Settings → API in the Supabase dashboard');
+  console.error('  2. The project is not paused or deleted (restore it from the dashboard)');
+  console.error('  3. Restart npm run dev after updating .env');
+  process.exit(1);
 }
